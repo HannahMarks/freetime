@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -23,23 +24,24 @@ type Props = {
 };
 
 /**
- * Wraps the month grid so the user can swipe it upward to hide it. Pan
- * activates only after 15px of vertical movement, so day-taps and the
- * Calendar's own horizontal month-swipes are unaffected. On release:
- * past threshold → animate off-screen + fire onDismiss; otherwise spring
- * back to zero.
+ * Wraps the month grid (or anything else) with a small drag-handle bar
+ * above it. Dragging the handle upward translates the whole group; past
+ * `DISMISS_THRESHOLD_PX` on release, fires onDismiss.
+ *
+ * Why a dedicated handle and not "just drag the calendar":
+ * react-native-gesture-handler doesn't reliably release pending-state
+ * touches back to non-gesture-handler children. Wrapping the Calendar in
+ * a Pan gesture detector — even with `failOffsetX` — broke the
+ * Calendar's own next/prev-month horizontal swipe and absorbed taps.
+ * Putting the gesture on a dedicated handle leaves the Calendar
+ * completely untouched: taps select days, horizontal swipes navigate
+ * months, and the handle is the only swipe target.
  */
 export function DismissibleMonthGrid({ onDismiss, children }: Props) {
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);
 
-  // Activation rules:
-  // - Only react to *upward* drags ≥ 10px (single-arg activeOffsetY).
-  // - Fail (let the touch fall through) on horizontal drags ≥ 15px so the
-  //   Calendar's own next-/prev-month swipe still works.
   const pan = Gesture.Pan()
-    .activeOffsetY(-10)
-    .failOffsetX([-15, 15])
     .onUpdate((e) => {
       translateY.value = Math.min(0, e.translationY);
       opacity.value = Math.max(0, 1 + e.translationY / FADE_DISTANCE_PX);
@@ -61,18 +63,36 @@ export function DismissibleMonthGrid({ onDismiss, children }: Props) {
   }));
 
   return (
-    <GestureDetector gesture={pan}>
-      {/* `collapsable={false}` keeps the Animated.View as a real native
-          host on Android so it reliably receives touches inside the
-          GestureDetector — without this, RN may flatten the view away
-          and the gesture never fires. */}
-      <Animated.View
-        testID="dismissible-month-grid"
-        collapsable={false}
-        style={animatedStyle}
-      >
-        {children}
-      </Animated.View>
-    </GestureDetector>
+    <Animated.View testID="dismissible-month-grid" style={animatedStyle}>
+      <GestureDetector gesture={pan}>
+        {/* Dedicated drag-handle area. Tappable surface (~28px tall) so
+            the handle is easy to grab; the visible bar inside is smaller.
+            collapsable={false} keeps the View as a real Android host. */}
+        <View
+          testID="dismiss-handle"
+          collapsable={false}
+          style={styles.handleArea}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Drag down to hide the month grid"
+        >
+          <View style={styles.handleBar} />
+        </View>
+      </GestureDetector>
+      {children}
+    </Animated.View>
   );
 }
+
+const styles = StyleSheet.create({
+  handleArea: {
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  handleBar: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#cfcfcf',
+  },
+});
