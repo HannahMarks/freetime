@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useState } from 'react';
 import { Pressable, RefreshControlProps, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Directions, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -12,7 +12,6 @@ import {
   CalendarItem,
   formatTimeRange,
   shiftBlockByMinutes,
-  shiftDate,
   UnavailableDayItem,
 } from '../lib/calendar-helpers';
 import { tickSnap } from '../lib/haptics';
@@ -45,10 +44,6 @@ type Props = {
    * snapped to 15-minute increments and shifted equally so duration is
    * preserved. */
   onItemReschedule?: (item: BusyBlockItem, newStart: Date, newEnd: Date) => void;
-  /** Optional swipe-left/right handler. Called with the new YYYY-MM-DD
-   * after a horizontal fling. Parent should update its `selectedDate`
-   * and let the timeline re-render with the new day's items. */
-  onDateChange?: (newDate: string) => void;
 };
 
 /** Pretty hour label like "12 AM", "1 PM". */
@@ -84,7 +79,6 @@ export function DayTimeline({
   refreshControl,
   onItemPress,
   onItemReschedule,
-  onDateChange,
 }: Props) {
   const blocks = items.filter((i): i is BusyBlockItem => i.kind === 'busy_block');
   const days = items.filter((i): i is UnavailableDayItem => i.kind === 'unavailable_day');
@@ -95,25 +89,7 @@ export function DayTimeline({
   const dayStart = new Date(yyyy, mm - 1, dd).getTime();
   const dayEnd = new Date(yyyy, mm - 1, dd + 1).getTime();
 
-  // Horizontal-fling gesture for next/prev day. Direction-specific so it
-  // doesn't compete with the inner ScrollView's vertical scroll or the
-  // BusyBlockOverlay's long-press pan. Pre-compute the target dates so
-  // the worklet only handles primitives + a runOnJS call.
-  const nextDay = shiftDate(date, 1);
-  const prevDay = shiftDate(date, -1);
-  const flingNext = Gesture.Fling()
-    .direction(Directions.LEFT)
-    .onStart(() => {
-      if (onDateChange) runOnJS(onDateChange)(nextDay);
-    });
-  const flingPrev = Gesture.Fling()
-    .direction(Directions.RIGHT)
-    .onStart(() => {
-      if (onDateChange) runOnJS(onDateChange)(prevDay);
-    });
-  const horizontalSwipe = Gesture.Race(flingNext, flingPrev);
-
-  const content = (
+  return (
     <View style={styles.container}>
       {days.length > 0 ? (
         <View testID="day-timeline-banner" style={styles.banner}>
@@ -187,13 +163,6 @@ export function DayTimeline({
       </ScrollView>
     </View>
   );
-
-  // Only wrap in the horizontal-fling gesture when the parent wants
-  // day-change behavior, to keep the gesture surface minimal.
-  if (onDateChange) {
-    return <GestureDetector gesture={horizontalSwipe}>{content}</GestureDetector>;
-  }
-  return content;
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);

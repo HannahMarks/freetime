@@ -9,8 +9,8 @@ import {
 } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
 import { AddItemSheet } from '../../components/AddItemSheet';
-import { DayTimeline } from '../../components/DayTimeline';
-import { DismissibleMonthGrid } from '../../components/DismissibleMonthGrid';
+import { SwipeableDayCarousel } from '../../components/SwipeableDayCarousel';
+import { WeekStrip } from '../../components/WeekStrip';
 import { useAuth } from '../../lib/auth';
 import { updateBusyBlock } from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
@@ -18,9 +18,7 @@ import {
   BusyBlockItem,
   CalendarItem,
   computeMarkings,
-  formatDayLabel,
   isoDate,
-  itemsOnDate,
   monthRange,
 } from '../../lib/calendar-helpers';
 import { toast } from '../../lib/toast';
@@ -38,6 +36,14 @@ function todayInfo() {
   };
 }
 
+function formatMonthLabel(dateStr: string): string {
+  const [y, m] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 export default function CalendarScreen() {
   const { session, profile } = useAuth();
   const initial = useMemo(todayInfo, []);
@@ -47,7 +53,9 @@ export default function CalendarScreen() {
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [monthVisible, setMonthVisible] = useState(true);
+  // Month grid is hidden by default — the week strip below is the
+  // primary day-picker. Tap the chevron to expand the full month.
+  const [monthVisible, setMonthVisible] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarItem | null>(null);
 
@@ -113,6 +121,21 @@ export default function CalendarScreen() {
     setEditing(null);
   }
 
+  // Used by the week strip and the day-carousel: when the user picks a
+  // date in a different month, fetch that month's items too. The grid
+  // has its own `onMonthChange` so it doesn't go through this wrapper —
+  // browsing months via the grid arrows shouldn't auto-jump selectedDate.
+  const navigateToDate = useCallback(
+    (newDate: string) => {
+      setSelectedDate(newDate);
+      const [y, m] = newDate.split('-').map(Number);
+      if (y !== month.year || m - 1 !== month.monthIndex) {
+        setMonth({ year: y, monthIndex: m - 1 });
+      }
+    },
+    [month.year, month.monthIndex],
+  );
+
   const dotMarkings = useMemo(() => computeMarkings(items), [items]);
 
   const markedDates = useMemo(() => {
@@ -128,38 +151,12 @@ export default function CalendarScreen() {
     return merged;
   }, [dotMarkings, selectedDate]);
 
-  const selectedItems = useMemo(
-    () => itemsOnDate(items, selectedDate),
-    [items, selectedDate],
-  );
-
   const monthInitial = `${month.year}-${String(month.monthIndex + 1).padStart(2, '0')}-01`;
 
   return (
     <View style={styles.container}>
-      {monthVisible ? (
-        <DismissibleMonthGrid onDismiss={() => setMonthVisible(false)}>
-          <Calendar
-            testID="calendar-grid"
-            current={monthInitial}
-            markedDates={markedDates}
-            markingType="multi-dot"
-            enableSwipeMonths
-            onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
-            onMonthChange={(d: DateData) =>
-              setMonth({ year: d.year, monthIndex: d.month - 1 })
-            }
-            theme={{
-              arrowColor: SELECTED_BG,
-              todayTextColor: SELECTED_BG,
-              selectedDayBackgroundColor: SELECTED_BG,
-            }}
-          />
-        </DismissibleMonthGrid>
-      ) : null}
-
-      <View style={styles.dayHeader}>
-        <Text style={styles.dayLabel}>{formatDayLabel(selectedDate, initial.today)}</Text>
+      {/* Header: chevron toggle on the left, month label next to it. */}
+      <View style={styles.headerRow}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={monthVisible ? 'Hide month grid' : 'Show month grid'}
@@ -170,20 +167,51 @@ export default function CalendarScreen() {
         >
           <Text style={styles.toggleChevron}>{monthVisible ? '▲' : '▼'}</Text>
         </Pressable>
+        <Text style={styles.monthLabel} testID="month-label">
+          {formatMonthLabel(selectedDate)}
+        </Text>
       </View>
+
+      {/* Week strip OR full month grid — never both. The full grid
+          already includes everything the week strip shows, so they'd
+          stack redundantly. Chevron toggles between them. */}
+      {monthVisible ? (
+        <Calendar
+          testID="calendar-grid"
+          current={monthInitial}
+          markedDates={markedDates}
+          markingType="multi-dot"
+          enableSwipeMonths
+          onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
+          onMonthChange={(d: DateData) =>
+            setMonth({ year: d.year, monthIndex: d.month - 1 })
+          }
+          theme={{
+            arrowColor: SELECTED_BG,
+            todayTextColor: SELECTED_BG,
+            selectedDayBackgroundColor: SELECTED_BG,
+          }}
+        />
+      ) : (
+        <WeekStrip
+          selectedDate={selectedDate}
+          todayIso={initial.todayIso}
+          onDateChange={navigateToDate}
+        />
+      )}
 
       {loading ? (
         <View testID="calendar-loading" style={styles.loadingRow}>
           <ActivityIndicator />
         </View>
       ) : (
-        <DayTimeline
+        <SwipeableDayCarousel
           date={selectedDate}
-          items={selectedItems}
+          items={items}
           currentUserId={session?.user.id}
           onItemPress={handleItemPress}
           onItemReschedule={handleItemReschedule}
-          onDateChange={(newDate) => setSelectedDate(newDate)}
+          onDateChange={navigateToDate}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
@@ -220,21 +248,18 @@ export default function CalendarScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  dayHeader: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#eee',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 8,
   },
-  dayLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
-  toggleButton: { padding: 4 },
+  toggleButton: { padding: 6 },
   toggleButtonPressed: { opacity: 0.6 },
   toggleChevron: { fontSize: 14, color: '#666' },
+  monthLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fab: {
     position: 'absolute',
