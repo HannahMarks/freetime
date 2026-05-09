@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -12,6 +13,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   createBusyBlock,
   createUnavailableDay,
@@ -24,6 +33,11 @@ import { CalendarItem } from '../lib/calendar-helpers';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const SHEET_TOP_OFFSET = 60;
+const ENTER_DURATION_MS = 240;
+const EXIT_DURATION_MS = 200;
 
 type Kind = 'busy' | 'unavailable';
 
@@ -108,6 +122,47 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
 
   const [start, setStart] = useState<Date>(initialStart);
   const [end, setEnd] = useState<Date>(initialEnd);
+
+  // `rendered` lags behind `visible` so we can play an exit animation
+  // before the Modal actually unmounts. Mount immediately on open;
+  // unmount only after the slide-down completes.
+  const [rendered, setRendered] = useState<boolean>(visible);
+  const translateY = useSharedValue(visible ? 0 : SCREEN_HEIGHT);
+  const backdropOpacity = useSharedValue(visible ? 0.4 : 0);
+
+  useEffect(() => {
+    if (visible) {
+      setRendered(true);
+      translateY.value = withSpring(0, {
+        damping: 22,
+        stiffness: 240,
+        mass: 0.8,
+      });
+      backdropOpacity.value = withTiming(0.4, {
+        duration: ENTER_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+    } else if (rendered) {
+      translateY.value = withTiming(
+        SCREEN_HEIGHT,
+        { duration: EXIT_DURATION_MS, easing: Easing.in(Easing.cubic) },
+        (finished) => {
+          if (finished) runOnJS(setRendered)(false);
+        },
+      );
+      backdropOpacity.value = withTiming(0, {
+        duration: EXIT_DURATION_MS,
+        easing: Easing.in(Easing.cubic),
+      });
+    }
+  }, [visible, rendered, translateY, backdropOpacity]);
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
 
   // Reset whenever the sheet (re-)opens or the editing target changes.
   useEffect(() => {
@@ -212,12 +267,26 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
 
   return (
     <Modal
-      visible={visible}
-      animationType="slide"
+      visible={rendered}
+      animationType="none"
+      transparent
       onRequestClose={onClose}
-      presentationStyle="pageSheet"
+      presentationStyle="overFullScreen"
     >
-      <SafeAreaView style={styles.container} testID="add-item-sheet">
+      {/* Backdrop fades in/out behind the sheet — tap to dismiss. */}
+      <Animated.View
+        pointerEvents={rendered ? 'auto' : 'none'}
+        style={[styles.backdrop, backdropStyle]}
+      >
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel="Dismiss backdrop"
+        />
+      </Animated.View>
+      {/* Sheet slides up from below via spring. */}
+      <Animated.View style={[styles.sheet, sheetStyle]}>
+        <SafeAreaView style={styles.container} testID="add-item-sheet">
         <View style={styles.header}>
           <Pressable
             onPress={onClose}
@@ -369,11 +438,32 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           ) : null}
         </View>
       </SafeAreaView>
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
+  },
+  sheet: {
+    position: 'absolute',
+    top: SHEET_TOP_OFFSET,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: -2 },
+    shadowRadius: 12,
+    elevation: 12,
+  },
   container: { flex: 1, backgroundColor: '#fff' },
   flex: { flex: 1 },
   header: {
@@ -445,16 +535,16 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   save: {
-    paddingVertical: 14,
+    paddingVertical: 9,
     borderRadius: 8,
     backgroundColor: '#111',
     alignItems: 'center',
   },
   savePressed: { opacity: 0.85 },
   saveDisabled: { opacity: 0.5 },
-  saveLabel: { fontSize: 16, color: '#fff', fontWeight: '600' },
+  saveLabel: { fontSize: 14, color: '#fff', fontWeight: '600' },
   delete: {
-    paddingVertical: 14,
+    paddingVertical: 9,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#d92d20',
@@ -462,5 +552,5 @@ const styles = StyleSheet.create({
   },
   deletePressed: { backgroundColor: '#fff5f5' },
   deleteDisabled: { opacity: 0.5 },
-  deleteLabel: { fontSize: 16, color: '#d92d20', fontWeight: '600' },
+  deleteLabel: { fontSize: 14, color: '#d92d20', fontWeight: '600' },
 });

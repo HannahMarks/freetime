@@ -8,6 +8,12 @@ import {
   View,
 } from 'react-native';
 import { CalendarList, DateData } from 'react-native-calendars';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { AddItemSheet } from '../../components/AddItemSheet';
 import { MonthToggleChevron } from '../../components/MonthToggleChevron';
 import { SwipeableDayCarousel } from '../../components/SwipeableDayCarousel';
@@ -25,6 +31,8 @@ import {
 import { toast } from '../../lib/toast';
 
 const SELECTED_BG = '#111';
+const WEEK_STRIP_HEIGHT = 70;
+const MONTH_GRID_HEIGHT = 360;
 
 type MonthState = { year: number; monthIndex: number };
 
@@ -37,11 +45,15 @@ function todayInfo() {
   };
 }
 
-function formatMonthLabel(dateStr: string): string {
+function formatMonthLabel(dateStr: string, todayYear: number): string {
   const [y, m] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString(undefined, {
+  const date = new Date(y, m - 1, 1);
+  // Only include the year when the displayed month is not in the current
+  // calendar year — keeps the header tight ("May" most of the time)
+  // while still disambiguating when the user scrolls into another year.
+  return date.toLocaleDateString(undefined, {
     month: 'long',
-    year: 'numeric',
+    ...(y === todayYear ? {} : { year: 'numeric' }),
   });
 }
 
@@ -122,6 +134,35 @@ export default function CalendarScreen() {
     setEditing(null);
   }
 
+  // FAB icon rotates 45° as the sheet opens (the "+" morphs into an "×"
+  // visually). Reverses on close.
+  const fabRotation = useSharedValue(0);
+  useEffect(() => {
+    fabRotation.value = withTiming(addOpen ? 45 : 0, {
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [addOpen, fabRotation]);
+  const fabIconStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${fabRotation.value}deg` }],
+  }));
+
+  // Animated height for the toggle between the compact week strip and
+  // the full month grid. The wrapper expands/collapses over ~240ms,
+  // revealing/hiding the inner content under `overflow: hidden`. Single
+  // layer at a time keeps tests simple (only one of the two is in the
+  // tree at any moment).
+  const heightAnim = useSharedValue(monthVisible ? MONTH_GRID_HEIGHT : WEEK_STRIP_HEIGHT);
+  useEffect(() => {
+    heightAnim.value = withTiming(monthVisible ? MONTH_GRID_HEIGHT : WEEK_STRIP_HEIGHT, {
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [monthVisible, heightAnim]);
+  const monthWrapperStyle = useAnimatedStyle(() => ({
+    height: heightAnim.value,
+  }));
+
   // Used by the week strip and the day-carousel: when the user picks a
   // date in a different month, fetch that month's items too. The grid
   // has its own `onMonthChange` so it doesn't go through this wrapper —
@@ -163,17 +204,17 @@ export default function CalendarScreen() {
           onPress={() => setMonthVisible((v) => !v)}
         />
         <Text style={styles.monthLabel} testID="month-label">
-          {formatMonthLabel(selectedDate)}
+          {formatMonthLabel(selectedDate, initial.today.getFullYear())}
         </Text>
       </View>
 
-      {/* Week strip OR full month grid — never both. The full grid
-          already includes everything the week strip shows, so they'd
-          stack redundantly. Chevron toggles between them. CalendarList
-          (vs. plain Calendar) gives us the smooth horizontal-paged
-          slide between months when swiping. */}
-      {monthVisible ? (
-        <View style={styles.monthGridWrap} testID="calendar-grid-wrap">
+      {/* Single-layer toggle with an animated height. When the user
+          taps the chevron, monthVisible flips and the wrapper grows
+          (or shrinks) over ~240ms while the inner content is clipped
+          by overflow:hidden — the calendar reveals itself like a
+          drawer rather than appearing instantly. */}
+      <Animated.View style={[styles.monthWrapper, monthWrapperStyle]}>
+        {monthVisible ? (
           <CalendarList
             testID="calendar-grid"
             current={monthInitial}
@@ -195,15 +236,15 @@ export default function CalendarScreen() {
               selectedDayBackgroundColor: SELECTED_BG,
             }}
           />
-        </View>
-      ) : (
-        <SwipeableWeekStrip
-          selectedDate={selectedDate}
-          todayIso={initial.todayIso}
-          todayColor={profile?.color}
-          onDateChange={navigateToDate}
-        />
-      )}
+        ) : (
+          <SwipeableWeekStrip
+            selectedDate={selectedDate}
+            todayIso={initial.todayIso}
+            todayColor={profile?.color}
+            onDateChange={navigateToDate}
+          />
+        )}
+      </Animated.View>
 
       {loading ? (
         <View testID="calendar-loading" style={styles.loadingRow}>
@@ -237,7 +278,7 @@ export default function CalendarScreen() {
           pressed && styles.fabPressed,
         ]}
       >
-        <Text style={styles.fabIcon}>+</Text>
+        <Animated.Text style={[styles.fabIcon, fabIconStyle]}>+</Animated.Text>
       </Pressable>
 
       <AddItemSheet
@@ -262,7 +303,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   monthLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
-  monthGridWrap: { height: 360 },
+  monthWrapper: {
+    overflow: 'hidden',
+  },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fab: {
     position: 'absolute',
