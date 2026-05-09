@@ -1,10 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import CalendarScreen from '../app/(app)/calendar';
-import {
-  deleteBusyBlock,
-  deleteUnavailableDay,
-} from '../lib/availability-actions';
+import { deleteBusyBlock } from '../lib/availability-actions';
 import { listCalendarItems } from '../lib/calendar-actions';
 import { toast } from '../lib/toast';
 
@@ -52,7 +49,6 @@ jest.mock('react-native-calendars', () => {
 
 const mockedList = listCalendarItems as jest.MockedFunction<typeof listCalendarItems>;
 const mockedDeleteBusy = deleteBusyBlock as jest.MockedFunction<typeof deleteBusyBlock>;
-const mockedDeleteDay = deleteUnavailableDay as jest.MockedFunction<typeof deleteUnavailableDay>;
 
 const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 
