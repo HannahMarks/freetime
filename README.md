@@ -16,7 +16,8 @@ This is a hobby project. Every third-party service used is on its free / hobby t
 
 - **Frontend:** Expo SDK 54 / React Native, TypeScript, [Expo Router](https://docs.expo.dev/router/) (file-based routing).
 - **Backend:** [Supabase](https://supabase.com) — Postgres + Auth + Realtime + Storage.
-- **CI:** GitHub Actions — EAS Update on every PR/main push, pgTAP database tests on `supabase/**` changes.
+- **CI:** GitHub Actions — EAS Update on every PR/main push, pgTAP database tests on `supabase/**` changes, jest unit tests on every PR.
+- **Testing:** [`jest-expo`](https://docs.expo.dev/develop/unit-testing/) + [`@testing-library/react-native`](https://callstack.github.io/react-native-testing-library/) for component tests, [pgTAP](https://pgtap.org/) for database tests.
 - **Distribution:** EAS Update for OTA JS bundles, EAS Build for native binaries (manual).
 
 ## Local development
@@ -56,6 +57,15 @@ npm run web        # or `ios` / `android`
    npm run db:push
    ```
 
+### Unit tests
+
+```bash
+npm test          # runs the jest suite once
+npm run test:watch  # re-runs on file changes
+```
+
+CI runs the jest suite on every PR.
+
 ### Database tests (requires Docker)
 
 ```bash
@@ -87,7 +97,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ EAS Update GitHub Actions workflow ([#2](https://github.com/HannahMarks/freetime/pull/2))
 - ✅ Foundation — Expo Router, Supabase client, auth-gated nav skeleton ([#3](https://github.com/HannahMarks/freetime/pull/3))
 - ✅ CLAUDE.md guidance ([#4](https://github.com/HannahMarks/freetime/pull/4))
-- 🚧 Schema for profiles + friendships, with pgTAP test harness ([#5](https://github.com/HannahMarks/freetime/pull/5))
+- ✅ Schema for profiles + friendships, with pgTAP test harness ([#5](https://github.com/HannahMarks/freetime/pull/5))
+- 🚧 Unit test infrastructure — jest-expo + @testing-library/react-native, CI workflow
 - ⏳ Auth flow — email sign up / sign in / sign out, profile creation with display name + color picker
 - ⏳ Friends — list, search by email, send / accept / reject requests
 - ⏳ Schema for `availability_blocks` (time-range model)
