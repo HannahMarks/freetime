@@ -100,8 +100,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ CLAUDE.md guidance ([#4](https://github.com/HannahMarks/freetime/pull/4))
 - ✅ Schema for profiles + friendships, with pgTAP test harness ([#5](https://github.com/HannahMarks/freetime/pull/5))
 - ✅ Unit test infrastructure — jest-expo + @testing-library/react-native, CI workflow ([#7](https://github.com/HannahMarks/freetime/pull/7))
-- 🚧 Auth flow — email sign up / sign in / sign out, profile creation with display name + hex color picker
-- ⏳ Friends — list, search by email, send / accept / reject requests
+- ✅ Auth flow — email sign up / sign in / sign out, profile creation with display name + hex color picker ([#8](https://github.com/HannahMarks/freetime/pull/8))
+- 🚧 Friends — list, search by name, send / accept / decline / cancel / remove
 - ⏳ Schema for `availability_blocks` (time-range model)
 - ⏳ Calendar view — read-only, friends' availability overlaid in their colors
 - ⏳ Availability editing — add / edit / delete your own time blocks
