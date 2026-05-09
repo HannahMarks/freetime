@@ -10,6 +10,7 @@ import {
 import { Calendar, DateData } from 'react-native-calendars';
 import { AddItemSheet } from '../../components/AddItemSheet';
 import { DayTimeline } from '../../components/DayTimeline';
+import { DismissibleMonthGrid } from '../../components/DismissibleMonthGrid';
 import { useAuth } from '../../lib/auth';
 import { updateBusyBlock } from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
@@ -137,21 +138,23 @@ export default function CalendarScreen() {
   return (
     <View style={styles.container}>
       {monthVisible ? (
-        <Calendar
-          testID="calendar-grid"
-          current={monthInitial}
-          markedDates={markedDates}
-          markingType="multi-dot"
-          onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
-          onMonthChange={(d: DateData) =>
-            setMonth({ year: d.year, monthIndex: d.month - 1 })
-          }
-          theme={{
-            arrowColor: SELECTED_BG,
-            todayTextColor: SELECTED_BG,
-            selectedDayBackgroundColor: SELECTED_BG,
-          }}
-        />
+        <DismissibleMonthGrid onDismiss={() => setMonthVisible(false)}>
+          <Calendar
+            testID="calendar-grid"
+            current={monthInitial}
+            markedDates={markedDates}
+            markingType="multi-dot"
+            onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
+            onMonthChange={(d: DateData) =>
+              setMonth({ year: d.year, monthIndex: d.month - 1 })
+            }
+            theme={{
+              arrowColor: SELECTED_BG,
+              todayTextColor: SELECTED_BG,
+              selectedDayBackgroundColor: SELECTED_BG,
+            }}
+          />
+        </DismissibleMonthGrid>
       ) : null}
 
       <View style={styles.dayHeader}>
