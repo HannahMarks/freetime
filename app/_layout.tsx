@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
 import { AuthProvider, useAuth } from '../lib/auth';
 
 function RootLayoutNav() {
@@ -37,6 +38,8 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <AuthProvider>
           <RootLayoutNav />
+          {/* Toast must render at the root so it floats above every screen. */}
+          <Toast />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
