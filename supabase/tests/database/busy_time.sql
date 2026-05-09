@@ -4,7 +4,7 @@
 
 begin;
 
-select plan(30);
+select plan(34);
 
 -- ────────────────────────────────────────────────────────────────────
 -- busy_blocks schema shape
@@ -224,17 +224,23 @@ select results_ne(
   'cross-user DELETE on busy_blocks silently filtered out by RLS'
 );
 
+-- Trigger test needs an explicit older created_at because pgTAP wraps
+-- the suite in a transaction and `now()` returns transaction_timestamp
+-- (same value across all calls in the transaction). Without this, the
+-- trigger fires correctly but updated_at and created_at end up equal.
+set local role postgres;
+insert into public.busy_blocks (user_id, title, starts_at, ends_at, created_at, updated_at) values
+  ('00000000-0000-0000-0000-00000000aaa1', 'Trigger probe',
+   now() + interval '7 days', now() + interval '7 days 1 hour',
+   now() - interval '1 hour', now() - interval '1 hour');
+
 set local role authenticated;
 set local "request.jwt.claims" to '{"sub":"00000000-0000-0000-0000-00000000aaa1","role":"authenticated"}';
-
--- Alice updates her own busy_block, updated_at trigger fires.
-update public.busy_blocks
-   set title = 'Lunch with Sarah (rescheduled)'
- where user_id = '00000000-0000-0000-0000-00000000aaa1' and title = 'Lunch with Sarah';
+update public.busy_blocks set title = 'Trigger probe (touched)' where title = 'Trigger probe';
 
 select ok(
   (select updated_at > created_at from public.busy_blocks
-    where title = 'Lunch with Sarah (rescheduled)' limit 1),
+    where title = 'Trigger probe (touched)' limit 1),
   'updated_at trigger fires on busy_blocks UPDATE'
 );
 
