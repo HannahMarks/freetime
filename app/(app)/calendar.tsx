@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
+import { DayTimeline } from '../../components/DayTimeline';
 import { listCalendarItems } from '../../lib/calendar-actions';
 import {
   CalendarItem,
   computeMarkings,
   formatDayLabel,
-  formatTimeRange,
   isoDate,
   itemsOnDate,
   monthRange,
@@ -71,11 +64,11 @@ export default function CalendarScreen() {
 
   const dotMarkings = useMemo(() => computeMarkings(items), [items]);
 
-  // Merge friend-color dots with the selection highlight for the active day.
   const markedDates = useMemo(() => {
-    const merged: Record<string, { dots?: { key: string; color: string }[]; selected?: boolean; selectedColor?: string }> = {
-      ...dotMarkings,
-    };
+    const merged: Record<
+      string,
+      { dots?: { key: string; color: string }[]; selected?: boolean; selectedColor?: string }
+    > = { ...dotMarkings };
     merged[selectedDate] = {
       ...(merged[selectedDate] ?? { dots: [] }),
       selected: true,
@@ -92,11 +85,7 @@ export default function CalendarScreen() {
   const monthInitial = `${month.year}-${String(month.monthIndex + 1).padStart(2, '0')}-01`;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-    >
+    <View style={styles.container}>
       <Calendar
         testID="calendar-grid"
         current={monthInitial}
@@ -114,61 +103,36 @@ export default function CalendarScreen() {
         }}
       />
 
-      <View style={styles.dayPanel}>
+      <View style={styles.dayHeader}>
         <Text style={styles.dayLabel}>{formatDayLabel(selectedDate, initial.today)}</Text>
-        {loading ? (
-          <View testID="calendar-loading" style={styles.loadingRow}>
-            <ActivityIndicator />
-          </View>
-        ) : selectedItems.length === 0 ? (
-          <Text style={styles.empty}>Free</Text>
-        ) : (
-          selectedItems.map((item) => <ItemRow key={itemKey(item)} item={item} />)
-        )}
       </View>
-    </ScrollView>
-  );
-}
 
-function itemKey(item: CalendarItem): string {
-  return item.kind === 'busy_block'
-    ? `bb:${item.id}`
-    : `ud:${item.user.id}:${item.date}`;
-}
-
-function ItemRow({ item }: { item: CalendarItem }) {
-  const subtitle =
-    item.kind === 'busy_block' ? formatTimeRange(item.startsAt, item.endsAt) : 'All day';
-  const titleSuffix = item.title ? ` · ${item.title}` : '';
-  return (
-    <View style={styles.row} testID={`calendar-item-${itemKey(item)}`}>
-      <View style={[styles.avatar, { backgroundColor: item.user.color }]} />
-      <View style={styles.rowText}>
-        <Text style={styles.rowTitle}>
-          {item.user.display_name}
-          {titleSuffix}
-        </Text>
-        <Text style={styles.rowSubtitle}>{subtitle}</Text>
-      </View>
+      {loading ? (
+        <View testID="calendar-loading" style={styles.loadingRow}>
+          <ActivityIndicator />
+        </View>
+      ) : (
+        <DayTimeline
+          items={selectedItems}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  content: { paddingBottom: 24 },
-  dayPanel: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },
-  dayLabel: { fontSize: 18, fontWeight: '600', color: '#111' },
-  empty: { fontSize: 14, color: '#bbb', fontStyle: 'italic', paddingVertical: 8 },
-  loadingRow: { paddingVertical: 24, alignItems: 'center' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
+  dayHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#eee',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
   },
-  avatar: { width: 28, height: 28, borderRadius: 14 },
-  rowText: { flex: 1, gap: 2 },
-  rowTitle: { fontSize: 15, color: '#111' },
-  rowSubtitle: { fontSize: 13, color: '#666' },
+  dayLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
+  loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });

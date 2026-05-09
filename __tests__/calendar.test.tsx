@@ -11,8 +11,8 @@ jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
 }));
 
-// Stub out react-native-calendars and capture the most recent props so tests
-// can read the markings + simulate day-press / month-change interactions.
+// Stub react-native-calendars and capture the most recent props so tests can
+// read the markings + simulate day-press / month-change interactions.
 let lastCalendarProps: {
   current?: string;
   markedDates?: Record<string, unknown>;
@@ -58,7 +58,6 @@ describe('CalendarScreen', () => {
     render(<CalendarScreen />);
     await flushAsync();
 
-    // Today is May 13, 2026 → range is [2026-05-01, 2026-06-01).
     expect(mockedList).toHaveBeenCalledWith({
       fromDate: '2026-05-01',
       toDate: '2026-06-01',
@@ -84,16 +83,15 @@ describe('CalendarScreen', () => {
     expect(todayMarking.selected).toBe(true);
   });
 
-  it("shows 'Free' under the day panel when the selected day has no items", async () => {
+  it('renders the day label header for the selected day', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
 
     expect(screen.getByText('Today')).toBeOnTheScreen();
-    expect(screen.getByText('Free')).toBeOnTheScreen();
   });
 
-  it('shows the selected day items in the panel below the grid', async () => {
+  it('renders the DayTimeline with the selected day items', async () => {
     mockedList.mockResolvedValue({
       data: [
         {
@@ -110,8 +108,20 @@ describe('CalendarScreen', () => {
     render(<CalendarScreen />);
     await flushAsync();
 
+    expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
     expect(screen.getByText(/Alice · Lunch with Sarah/)).toBeOnTheScreen();
-    expect(screen.getByTestId('calendar-item-bb:bb1')).toBeOnTheScreen();
+  });
+
+  it('renders unavailable_day items as a banner above the timeline', async () => {
+    mockedList.mockResolvedValue({
+      data: [{ kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'Wedding' }],
+      error: null,
+    });
+    render(<CalendarScreen />);
+    await flushAsync();
+
+    expect(screen.getByTestId('day-banner-b')).toBeOnTheScreen();
+    expect(screen.getByText(/Bob · Wedding/)).toBeOnTheScreen();
   });
 
   it('emits a colored dot per friend with items on a day', async () => {
@@ -143,24 +153,31 @@ describe('CalendarScreen', () => {
     );
   });
 
-  it("changes the selected day when the grid's onDayPress fires", async () => {
+  it("changes the selected day and re-renders the timeline when onDayPress fires", async () => {
     mockedList.mockResolvedValue({
       data: [
-        { kind: 'unavailable_day', user: bob, date: '2026-05-15', title: 'Wedding' },
+        {
+          kind: 'busy_block',
+          id: 'bb1',
+          user: bob,
+          startsAt: new Date(2026, 4, 15, 16, 0),
+          endsAt: new Date(2026, 4, 15, 17, 0),
+          title: 'Coffee',
+        },
       ],
       error: null,
     });
     render(<CalendarScreen />);
     await flushAsync();
 
-    // Initially selecting today (May 13) — Bob's wedding on May 15 isn't in panel yet.
-    expect(screen.queryByText(/Bob · Wedding/)).toBeNull();
+    // Today (May 13) selected initially → Bob's coffee on May 15 isn't visible.
+    expect(screen.queryByTestId('day-block-bb1')).toBeNull();
 
     await act(async () => {
       lastCalendarProps.onDayPress?.({ dateString: '2026-05-15' });
     });
 
-    expect(screen.getByText(/Bob · Wedding/)).toBeOnTheScreen();
+    expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
   });
 
   it('refetches when the user navigates to a new month', async () => {
@@ -170,7 +187,6 @@ describe('CalendarScreen', () => {
 
     expect(mockedList).toHaveBeenCalledTimes(1);
 
-    // react-native-calendars delivers month numbers 1-indexed (June = 6).
     await act(async () => {
       lastCalendarProps.onMonthChange?.({ year: 2026, month: 6 });
     });
