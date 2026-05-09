@@ -12,7 +12,6 @@ import {
   CalendarItem,
   formatTimeRange,
   shiftBlockByMinutes,
-  snapMinutes,
   UnavailableDayItem,
 } from '../lib/calendar-helpers';
 
@@ -22,6 +21,7 @@ const TOTAL_HEIGHT = HOUR_HEIGHT * 24;
 const SNAP_MINUTES = 15;
 const LONG_PRESS_MS = 250;
 const MS_PER_HOUR = 60 * 60 * 1000;
+const PIXELS_PER_MINUTE = HOUR_HEIGHT / 60; // 0.8
 
 type Props = {
   /** YYYY-MM-DD of the day this timeline is rendering. Multi-day blocks
@@ -145,7 +145,11 @@ export function DayTimeline({
 
           return (
             <BusyBlockOverlay
-              key={block.id}
+              // Re-key on startsAt so a successful drag-reschedule cleanly
+              // re-mounts the overlay (offsetY resets to 0) at the same
+              // screen position the snapped visual was already showing —
+              // no flicker, no bounce.
+              key={`${block.id}:${block.startsAt.getTime()}`}
               block={block}
               top={top}
               height={height}
@@ -181,18 +185,13 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
   const offsetY = useSharedValue(0);
   const isDragging = useSharedValue(0);
 
-  // The gesture's onEnd callback runs as a Reanimated worklet on the UI
-  // thread, so it can't call non-worklet JS functions like `snapMinutes`
-  // and `shiftBlockByMinutes` directly — that throws at runtime even
-  // though jest doesn't catch it (jest has no UI/JS thread split). All
-  // JS-side commit logic lives here and is invoked via runOnJS.
+  // Commit runs on the JS thread (invoked via runOnJS from the worklet).
+  // Takes the already-snapped minute delta — the snap math is inlined in
+  // the worklet so we don't have to call non-worklet helpers from there.
   const commit = useCallback(
-    (translationY: number) => {
-      if (!onReschedule) return;
-      const rawDeltaMinutes = (translationY / HOUR_HEIGHT) * 60;
-      const snapped = snapMinutes(rawDeltaMinutes, SNAP_MINUTES);
-      if (snapped === 0) return;
-      const { startsAt, endsAt } = shiftBlockByMinutes(block, snapped);
+    (deltaMinutes: number) => {
+      if (!onReschedule || deltaMinutes === 0) return;
+      const { startsAt, endsAt } = shiftBlockByMinutes(block, deltaMinutes);
       onReschedule(block, startsAt, endsAt);
     },
     [block, onReschedule],
@@ -207,9 +206,22 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
       offsetY.value = e.translationY;
     })
     .onEnd((e) => {
-      offsetY.value = withTiming(0, { duration: 150 });
+      // Snap math inlined so the worklet doesn't call non-worklet JS.
+      const rawDeltaMinutes = e.translationY / PIXELS_PER_MINUTE;
+      const snappedMinutes =
+        Math.round(rawDeltaMinutes / SNAP_MINUTES) * SNAP_MINUTES;
+      const snappedPx = snappedMinutes * PIXELS_PER_MINUTE;
+
+      // Animate to the snapped position (Google-Calendar-style — no
+      // bounce-back to original). The parent re-keys the overlay on
+      // block.startsAt, so when the refetch lands, this component
+      // remounts fresh with offsetY=0 at top_new — which is the same
+      // screen position the snapped offset is currently showing.
+      offsetY.value = withTiming(snappedPx, { duration: 150 });
       isDragging.value = withTiming(0, { duration: 150 });
-      runOnJS(commit)(e.translationY);
+      if (snappedMinutes !== 0) {
+        runOnJS(commit)(snappedMinutes);
+      }
     })
     .enabled(owned && !!onReschedule);
 
