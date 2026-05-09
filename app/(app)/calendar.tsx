@@ -321,7 +321,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // 'baseline' aligns the bottom of the chevron's bounding box with
+    // the bottom of the text — i.e. the chevron's pointing tip lines
+    // up with the text baseline.
+    alignItems: 'baseline',
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 4,
@@ -339,6 +342,10 @@ const styles = StyleSheet.create({
   },
   monthWrapper: {
     overflow: 'hidden',
+    // Faint divider underneath the calendar/week strip — separates the
+    // header section from the day timeline below.
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e5e5',
   },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fab: {
