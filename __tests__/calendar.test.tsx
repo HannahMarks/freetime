@@ -206,7 +206,7 @@ describe('CalendarScreen', () => {
       expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
     });
 
-    it("hides the month grid when the toggle is tapped, and shows 'Show month'", async () => {
+    it("hides the month grid when the toggle is tapped, and updates the accessibility label", async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
@@ -214,10 +214,10 @@ describe('CalendarScreen', () => {
       fireEvent.press(screen.getByTestId('toggle-month-grid'));
 
       expect(screen.queryByTestId('calendar-grid')).toBeNull();
-      expect(screen.getByText('Show month')).toBeOnTheScreen();
+      expect(screen.getByLabelText('Show month grid')).toBeOnTheScreen();
     });
 
-    it("shows the month grid again on a second tap, and reverts the label to 'Hide month'", async () => {
+    it("shows the month grid again on a second tap, and reverts the accessibility label", async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
@@ -227,7 +227,7 @@ describe('CalendarScreen', () => {
       fireEvent.press(toggle);
 
       expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
-      expect(screen.getByText('Hide month')).toBeOnTheScreen();
+      expect(screen.getByLabelText('Hide month grid')).toBeOnTheScreen();
     });
 
     it("preserves the selected day's items in the timeline while toggling visibility", async () => {

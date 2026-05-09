@@ -120,10 +120,9 @@ export default function CalendarScreen() {
           accessibilityLabel={monthVisible ? 'Hide month grid' : 'Show month grid'}
           testID="toggle-month-grid"
           onPress={() => setMonthVisible((v) => !v)}
-          hitSlop={8}
+          hitSlop={12}
           style={({ pressed }) => [styles.toggleButton, pressed && styles.toggleButtonPressed]}
         >
-          <Text style={styles.toggleText}>{monthVisible ? 'Hide month' : 'Show month'}</Text>
           <Text style={styles.toggleChevron}>{monthVisible ? '▲' : '▼'}</Text>
         </Pressable>
       </View>
@@ -158,9 +157,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   dayLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
-  toggleButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  toggleButton: { padding: 4 },
   toggleButtonPressed: { opacity: 0.6 },
-  toggleText: { fontSize: 13, color: '#666' },
-  toggleChevron: { fontSize: 11, color: '#666' },
+  toggleChevron: { fontSize: 14, color: '#666' },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
