@@ -107,7 +107,9 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ Availability editing — FAB-launched add sheet, scroll-wheel time pickers, tap-to-edit / tap-to-delete on your own items, FAB tinted with profile color ([#19](https://github.com/HannahMarks/freetime/pull/19), [#20](https://github.com/HannahMarks/freetime/pull/20), [#21](https://github.com/HannahMarks/freetime/pull/21))
 - ✅ Multi-day busy_blocks — date pickers in the add sheet, per-day timeline clipping, overlap query so cross-month blocks still appear ([#22](https://github.com/HannahMarks/freetime/pull/22))
 - ✅ Tap-to-edit + full-page sheet — tapping your own item opens the sheet directly (no Edit/Delete action sheet); sheet is now a full-page page-sheet modal with Close + Save + Delete in the chrome ([#23](https://github.com/HannahMarks/freetime/pull/23))
-- 🚧 Notes + location — `notes` + `location` columns on `busy_blocks`, `notes` on `unavailable_days`; multi-line Notes input + single-line Location input in the sheet (#24)
+- ✅ Notes + location — `notes` + `location` columns on `busy_blocks`, `notes` on `unavailable_days`; multi-line Notes input + single-line Location input in the sheet ([#24](https://github.com/HannahMarks/freetime/pull/24))
+- ✅ Drag-to-reschedule — long-press a busy_block on the day timeline and pan to a new time; release commits via `updateBusyBlock`, snapping to 15-min increments and preserving duration ([#25](https://github.com/HannahMarks/freetime/pull/25))
+- 🚧 Swipe-to-dismiss month grid — drag the month grid upward past a threshold to hide it; chevron still toggles it back (#26)
 
 ### Phase 2 — events + invites
 
