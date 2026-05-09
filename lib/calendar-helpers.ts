@@ -15,6 +15,8 @@ export type BusyBlockItem = {
   startsAt: Date;
   endsAt: Date;
   title: string | null;
+  notes: string | null;
+  location: string | null;
 };
 
 export type UnavailableDayItem = {
@@ -22,6 +24,7 @@ export type UnavailableDayItem = {
   user: FriendProfile;
   date: string; // YYYY-MM-DD
   title: string | null;
+  notes: string | null;
 };
 
 export type CalendarItem = BusyBlockItem | UnavailableDayItem;

@@ -93,6 +93,8 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
 
   const [kind, setKind] = useState<Kind>(editingKind ?? 'busy');
   const [title, setTitle] = useState('');
+  const [location, setLocation] = useState('');
+  const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const initialStart = useMemo(() => {
@@ -112,6 +114,8 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     if (visible) {
       setKind(editingKind ?? 'busy');
       setTitle(editing?.title ?? '');
+      setLocation(editing?.kind === 'busy_block' ? (editing.location ?? '') : '');
+      setNotes(editing?.notes ?? '');
       setStart(initialStart);
       setEnd(initialEnd);
     }
@@ -122,6 +126,8 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     setSubmitting(true);
     try {
       const trimmedTitle = title.trim() || null;
+      const trimmedLocation = location.trim() || null;
+      const trimmedNotes = notes.trim() || null;
       if (kind === 'busy') {
         if (end <= start) {
           toast.error('End time must be after start time.');
@@ -134,11 +140,15 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 startsAt: start,
                 endsAt: end,
                 title: trimmedTitle,
+                notes: trimmedNotes,
+                location: trimmedLocation,
               })
             : await createBusyBlock({
                 startsAt: start,
                 endsAt: end,
                 title: trimmedTitle,
+                notes: trimmedNotes,
+                location: trimmedLocation,
               });
         if (error) {
           toast.error(error);
@@ -151,10 +161,12 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 userId: editing.user.id,
                 date: editing.date,
                 title: trimmedTitle,
+                notes: trimmedNotes,
               })
             : await createUnavailableDay({
                 date: selectedDate,
                 title: trimmedTitle,
+                notes: trimmedNotes,
               });
         if (error) {
           toast.error(error);
@@ -297,8 +309,32 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                     />
                   </View>
                 </View>
+
+                <View style={styles.field}>
+                  <Text style={styles.label}>Location (optional)</Text>
+                  <TextInput
+                    testID="input-location"
+                    placeholder="Where?"
+                    style={styles.input}
+                    value={location}
+                    onChangeText={setLocation}
+                  />
+                </View>
               </>
             ) : null}
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Notes (optional)</Text>
+              <TextInput
+                testID="input-notes"
+                placeholder="Anything to remember?"
+                style={[styles.input, styles.notesInput]}
+                value={notes}
+                onChangeText={setNotes}
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
           </ScrollView>
         </KeyboardAvoidingView>
 
@@ -384,6 +420,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
+  },
+  notesInput: {
+    minHeight: 96,
   },
   timeRow: {
     flexDirection: 'row',

@@ -120,6 +120,9 @@ describe('CalendarScreen', () => {
           startsAt: new Date(2026, 4, 13, 12, 0),
           endsAt: new Date(2026, 4, 13, 13, 0),
           title: 'Lunch with Sarah',
+          notes: null,
+
+          location: null,
         },
       ],
       error: null,
@@ -133,7 +136,7 @@ describe('CalendarScreen', () => {
 
   it('renders unavailable_day items as a banner above the timeline', async () => {
     mockedList.mockResolvedValue({
-      data: [{ kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'Wedding' }],
+      data: [{ kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'Wedding' , notes: null }],
       error: null,
     });
     render(<CalendarScreen />);
@@ -153,8 +156,11 @@ describe('CalendarScreen', () => {
           startsAt: new Date(2026, 4, 14, 9, 0),
           endsAt: new Date(2026, 4, 14, 10, 0),
           title: null,
+          notes: null,
+
+          location: null,
         },
-        { kind: 'unavailable_day', user: bob, date: '2026-05-14', title: null },
+        { kind: 'unavailable_day', user: bob, date: '2026-05-14', title: null , notes: null },
       ],
       error: null,
     });
@@ -182,6 +188,9 @@ describe('CalendarScreen', () => {
           startsAt: new Date(2026, 4, 15, 16, 0),
           endsAt: new Date(2026, 4, 15, 17, 0),
           title: 'Coffee',
+          notes: null,
+
+          location: null,
         },
       ],
       error: null,
@@ -209,6 +218,9 @@ describe('CalendarScreen', () => {
           startsAt: new Date(2026, 4, 13, 18, 0),
           endsAt: new Date(2026, 4, 15, 9, 0),
           title: 'Hiking',
+          notes: null,
+
+          location: null,
         },
       ],
       error: null,
@@ -298,6 +310,9 @@ describe('CalendarScreen', () => {
             startsAt: new Date(2026, 4, 13, 12, 0),
             endsAt: new Date(2026, 4, 13, 13, 0),
             title: 'Lunch',
+            notes: null,
+
+            location: null,
           },
         ],
         error: null,
@@ -346,6 +361,9 @@ describe('CalendarScreen', () => {
             startsAt: new Date(2026, 4, 13, 9, 0),
             endsAt: new Date(2026, 4, 13, 10, 0),
             title: 'Standup',
+            notes: null,
+
+            location: null,
           },
         ],
         error: null,
@@ -375,6 +393,9 @@ describe('CalendarScreen', () => {
             startsAt: new Date(2026, 4, 13, 9, 0),
             endsAt: new Date(2026, 4, 13, 10, 0),
             title: null,
+            notes: null,
+
+            location: null,
           },
         ],
         error: null,
@@ -392,7 +413,7 @@ describe('CalendarScreen', () => {
 
     it("opens the edit sheet directly when the user taps their own unavailable_day banner", async () => {
       mockedList.mockResolvedValue({
-        data: [{ kind: 'unavailable_day', user: me, date: '2026-05-13', title: 'PTO' }],
+        data: [{ kind: 'unavailable_day', user: me, date: '2026-05-13', title: 'PTO' , notes: null }],
         error: null,
       });
       const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -419,6 +440,9 @@ describe('CalendarScreen', () => {
             startsAt: new Date(2026, 4, 13, 9, 0),
             endsAt: new Date(2026, 4, 13, 10, 0),
             title: 'Standup',
+            notes: null,
+
+            location: null,
           },
         ],
         error: null,

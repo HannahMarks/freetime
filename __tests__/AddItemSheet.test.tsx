@@ -126,6 +126,61 @@ describe('AddItemSheet', () => {
     expect(screen.getByPlaceholderText('Family wedding')).toBeOnTheScreen();
   });
 
+  it('renders Location and Notes inputs in busy mode', () => {
+    render(<AddItemSheet {...baseProps} />);
+    expect(screen.getByTestId('input-location')).toBeOnTheScreen();
+    expect(screen.getByTestId('input-notes')).toBeOnTheScreen();
+  });
+
+  it('renders only Notes (no Location) in unavailable-day mode', () => {
+    render(<AddItemSheet {...baseProps} />);
+    fireEvent.press(screen.getByTestId('kind-unavailable'));
+    expect(screen.getByTestId('input-notes')).toBeOnTheScreen();
+    expect(screen.queryByTestId('input-location')).toBeNull();
+  });
+
+  it('saves a busy_block with the entered location and notes', async () => {
+    mockedCreateBusy.mockResolvedValue({ error: null });
+    render(<AddItemSheet {...baseProps} />);
+    fireEvent.changeText(screen.getByPlaceholderText('Lunch with Sarah'), 'Lunch');
+    fireEvent.changeText(screen.getByTestId('input-location'), 'Cafe Borrone');
+    fireEvent.changeText(screen.getByTestId('input-notes'), 'Bring the deck');
+    fireEvent.press(screen.getByLabelText('Save'));
+
+    await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+    const call = mockedCreateBusy.mock.calls[0][0];
+    expect(call.title).toBe('Lunch');
+    expect(call.location).toBe('Cafe Borrone');
+    expect(call.notes).toBe('Bring the deck');
+  });
+
+  it('saves location + notes as null when those inputs are blank', async () => {
+    mockedCreateBusy.mockResolvedValue({ error: null });
+    render(<AddItemSheet {...baseProps} />);
+    fireEvent.press(screen.getByLabelText('Save'));
+    await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+    const call = mockedCreateBusy.mock.calls[0][0];
+    expect(call.location).toBeNull();
+    expect(call.notes).toBeNull();
+  });
+
+  it('saves an unavailable_day with notes', async () => {
+    mockedCreateUnavail.mockResolvedValue({ error: null });
+    render(<AddItemSheet {...baseProps} />);
+    fireEvent.press(screen.getByTestId('kind-unavailable'));
+    fireEvent.changeText(screen.getByPlaceholderText('Family wedding'), 'PTO');
+    fireEvent.changeText(screen.getByTestId('input-notes'), 'Out of state');
+    fireEvent.press(screen.getByLabelText('Save'));
+
+    await waitFor(() =>
+      expect(mockedCreateUnavail).toHaveBeenCalledWith({
+        date: '2026-05-13',
+        title: 'PTO',
+        notes: 'Out of state',
+      }),
+    );
+  });
+
   it('renders start + end DatePickers initialized to the selectedDate', () => {
     render(<AddItemSheet {...baseProps} />);
     const dates = datePickersByTestID();
@@ -279,12 +334,15 @@ describe('AddItemSheet', () => {
       startsAt: new Date(2026, 4, 13, 14, 0),
       endsAt: new Date(2026, 4, 13, 15, 30),
       title: 'Yoga',
+      notes: 'Hot vinyasa',
+      location: 'Studio 5',
     };
     const editingDay: CalendarItem = {
       kind: 'unavailable_day',
       user: me,
       date: '2026-05-13',
       title: 'PTO',
+      notes: 'Hawaii through Sunday',
     };
 
     it("renders 'Edit' as the heading and hides the kind toggle", () => {
@@ -310,11 +368,24 @@ describe('AddItemSheet', () => {
         startsAt: new Date(2026, 4, 13, 18, 0),
         endsAt: new Date(2026, 4, 15, 9, 0),
         title: 'Hiking',
+        notes: null,
+        location: null,
       };
       render(<AddItemSheet {...baseProps} editing={editingTrip} />);
       const dates = datePickersByTestID();
       expect(dates['date-picker-start']?.value?.getDate()).toBe(13);
       expect(dates['date-picker-end']?.value?.getDate()).toBe(15);
+    });
+
+    it('pre-fills location and notes from the busy_block being edited', () => {
+      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      expect(screen.getByDisplayValue('Hot vinyasa')).toBeOnTheScreen();
+      expect(screen.getByDisplayValue('Studio 5')).toBeOnTheScreen();
+    });
+
+    it('pre-fills notes from the unavailable_day being edited', () => {
+      render(<AddItemSheet {...baseProps} editing={editingDay} />);
+      expect(screen.getByDisplayValue('Hawaii through Sunday')).toBeOnTheScreen();
     });
 
     it('calls updateBusyBlock with the new values when saving an edited busy_block', async () => {
@@ -325,8 +396,10 @@ describe('AddItemSheet', () => {
         <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
       );
 
-      // User edits the title and pushes start later by an hour.
+      // User edits the title and pushes start later by an hour, and bumps
+      // the location text.
       fireEvent.changeText(screen.getByDisplayValue('Yoga'), 'Yoga (rescheduled)');
+      fireEvent.changeText(screen.getByDisplayValue('Studio 5'), 'Studio 6');
       await act(async () => {
         const pickers = pickersByTestID();
         pickers['time-picker-start'].onChange?.(new Date(2026, 4, 13, 15, 0));
@@ -340,8 +413,9 @@ describe('AddItemSheet', () => {
       expect(call.title).toBe('Yoga (rescheduled)');
       expect(call.startsAt.getHours()).toBe(15);
       expect(call.endsAt.getHours()).toBe(16);
+      expect(call.location).toBe('Studio 6');
+      expect(call.notes).toBe('Hot vinyasa');
 
-      // create-path was not called.
       expect(mockedCreateBusy).not.toHaveBeenCalled();
       await waitFor(() => expect(onSaved).toHaveBeenCalled());
       await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -354,10 +428,14 @@ describe('AddItemSheet', () => {
       expect(pickersByTestID()['time-picker-start']).toBeUndefined();
     });
 
-    it('calls updateUnavailableDay with userId + date when saving an edited day marker', async () => {
+    it('calls updateUnavailableDay with userId + date + edited notes when saving', async () => {
       mockedUpdateUnavail.mockResolvedValue({ error: null });
       render(<AddItemSheet {...baseProps} editing={editingDay} />);
       fireEvent.changeText(screen.getByDisplayValue('PTO'), 'Sick day');
+      fireEvent.changeText(
+        screen.getByDisplayValue('Hawaii through Sunday'),
+        'Quick weekend trip',
+      );
       fireEvent.press(screen.getByLabelText('Save'));
 
       await waitFor(() =>
@@ -365,6 +443,7 @@ describe('AddItemSheet', () => {
           userId: 'me-id',
           date: '2026-05-13',
           title: 'Sick day',
+          notes: 'Quick weekend trip',
         }),
       );
     });
@@ -460,7 +539,7 @@ describe('AddItemSheet', () => {
     });
   });
 
-  it('saves an unavailable_day with the selectedDate and title', async () => {
+  it('saves an unavailable_day with the selectedDate and title (notes null when blank)', async () => {
     mockedCreateUnavail.mockResolvedValue({ error: null });
     const onSaved = jest.fn();
     const onClose = jest.fn();
@@ -473,6 +552,7 @@ describe('AddItemSheet', () => {
       expect(mockedCreateUnavail).toHaveBeenCalledWith({
         date: '2026-05-13',
         title: 'Sick',
+        notes: null,
       }),
     );
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
