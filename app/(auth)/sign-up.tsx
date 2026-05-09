@@ -11,22 +11,32 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { signIn } from '../../lib/auth-actions';
+import { ColorPicker } from '../../components/ColorPicker';
+import { signUp } from '../../lib/auth-actions';
 import { toast } from '../../lib/toast';
 
-export default function SignInScreen() {
+const DEFAULT_COLOR = '#4ECDC4';
+
+export default function SignUpScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [color, setColor] = useState(DEFAULT_COLOR);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit() {
-    if (!email.trim() || !password) {
+    if (!email.trim() || !password || !displayName.trim()) {
       toast.error('Please fill in every field.');
       return;
     }
     setSubmitting(true);
-    const { error } = await signIn({ email: email.trim(), password });
+    const { error } = await signUp({
+      email: email.trim(),
+      password,
+      displayName: displayName.trim(),
+      color,
+    });
     setSubmitting(false);
     if (error) {
       toast.error(error);
@@ -42,8 +52,8 @@ export default function SignInScreen() {
         style={styles.flex}
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>freetime</Text>
-          <Text style={styles.subtitle}>Sign in to see your friends&apos; calendars.</Text>
+          <Text style={styles.title}>Create your account</Text>
+          <Text style={styles.subtitle}>Pick a display name and a color your friends will recognize.</Text>
 
           <View style={styles.field}>
             <Text style={styles.label}>Email</Text>
@@ -63,7 +73,7 @@ export default function SignInScreen() {
             <TextInput
               placeholder="Password"
               autoCapitalize="none"
-              autoComplete="password"
+              autoComplete="password-new"
               secureTextEntry
               style={styles.input}
               value={password}
@@ -71,9 +81,26 @@ export default function SignInScreen() {
             />
           </View>
 
+          <View style={styles.field}>
+            <Text style={styles.label}>Display name</Text>
+            <TextInput
+              placeholder="Display name"
+              autoCapitalize="words"
+              autoComplete="name"
+              style={styles.input}
+              value={displayName}
+              onChangeText={setDisplayName}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Your color</Text>
+            <ColorPicker value={color} onChange={setColor} />
+          </View>
+
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Sign in"
+            accessibilityLabel="Sign up"
             disabled={submitting}
             onPress={handleSubmit}
             style={({ pressed }) => [
@@ -82,14 +109,14 @@ export default function SignInScreen() {
               submitting && styles.submitDisabled,
             ]}
           >
-            <Text style={styles.submitLabel}>{submitting ? 'Signing in…' : 'Sign in'}</Text>
+            <Text style={styles.submitLabel}>{submitting ? 'Creating…' : 'Sign up'}</Text>
           </Pressable>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>New here?</Text>
-            <Link href="/(auth)/sign-up" asChild>
+            <Text style={styles.footerText}>Already have an account?</Text>
+            <Link href="/(auth)/sign-in" asChild>
               <Pressable accessibilityRole="link">
-                <Text style={styles.footerLink}>Create an account</Text>
+                <Text style={styles.footerLink}>Sign in</Text>
               </Pressable>
             </Link>
           </View>
@@ -103,7 +130,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   flex: { flex: 1 },
   content: { padding: 24, gap: 16 },
-  title: { fontSize: 32, fontWeight: '700' },
+  title: { fontSize: 28, fontWeight: '700' },
   subtitle: { fontSize: 14, color: '#666', marginBottom: 8 },
   field: { gap: 6 },
   label: { fontSize: 13, fontWeight: '500', color: '#444' },

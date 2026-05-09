@@ -48,11 +48,12 @@ npm run web        # or `ios` / `android`
 
 1. Create a project at https://supabase.com/dashboard.
 2. Paste the **Project URL** and **anon (publishable) key** into `.env.local`.
-3. Link the local CLI to your remote project:
+3. **Disable email confirmation** for now: `Authentication → Sign In / Up → Email → Confirm email = off`. This lets users sign in immediately after signup. Flip it back on later if/when the project gets real users.
+4. Link the local CLI to your remote project:
    ```bash
    npx supabase link --project-ref <your-project-ref>
    ```
-4. Apply migrations to your remote DB:
+5. Apply migrations to your remote DB:
    ```bash
    npm run db:push
    ```
@@ -98,8 +99,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ Foundation — Expo Router, Supabase client, auth-gated nav skeleton ([#3](https://github.com/HannahMarks/freetime/pull/3))
 - ✅ CLAUDE.md guidance ([#4](https://github.com/HannahMarks/freetime/pull/4))
 - ✅ Schema for profiles + friendships, with pgTAP test harness ([#5](https://github.com/HannahMarks/freetime/pull/5))
-- 🚧 Unit test infrastructure — jest-expo + @testing-library/react-native, CI workflow
-- ⏳ Auth flow — email sign up / sign in / sign out, profile creation with display name + color picker
+- ✅ Unit test infrastructure — jest-expo + @testing-library/react-native, CI workflow ([#7](https://github.com/HannahMarks/freetime/pull/7))
+- 🚧 Auth flow — email sign up / sign in / sign out, profile creation with display name + hex color picker
 - ⏳ Friends — list, search by email, send / accept / reject requests
 - ⏳ Schema for `availability_blocks` (time-range model)
 - ⏳ Calendar view — read-only, friends' availability overlaid in their colors
