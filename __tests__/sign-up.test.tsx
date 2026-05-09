@@ -17,20 +17,6 @@ jest.mock('expo-router', () => ({
   Link: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-// Stub the picker so the heavy dep doesn't run in tests.
-jest.mock('reanimated-color-picker', () => {
-  const React = require('react');
-  const Pass = ({ children }: { children?: React.ReactNode }) =>
-    React.createElement(React.Fragment, null, children);
-  return {
-    __esModule: true,
-    default: Pass,
-    Panel1: () => null,
-    HueSlider: () => null,
-    Preview: () => null,
-  };
-});
-
 const mockedSignUp = signUp as jest.MockedFunction<typeof signUp>;
 
 describe('SignUpScreen', () => {
