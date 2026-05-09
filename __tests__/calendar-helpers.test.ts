@@ -189,6 +189,39 @@ describe('computeMarkings', () => {
   it('returns an empty object when given no items', () => {
     expect(computeMarkings([])).toEqual({});
   });
+
+  it('produces a dot on every day a multi-day busy_block spans', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: 'trip',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 18, 0),
+        endsAt: new Date(2026, 4, 15, 9, 0),
+        title: 'Hiking trip',
+      },
+    ];
+    const out = computeMarkings(items);
+    expect(out['2026-05-13'].dots).toEqual([{ key: 'a', color: '#FF6B6B' }]);
+    expect(out['2026-05-14'].dots).toEqual([{ key: 'a', color: '#FF6B6B' }]);
+    expect(out['2026-05-15'].dots).toEqual([{ key: 'a', color: '#FF6B6B' }]);
+  });
+
+  it('does not mark the next day when a block ends exactly at midnight', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: 'overnight',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 22, 0),
+        endsAt: new Date(2026, 4, 14, 0, 0),
+        title: null,
+      },
+    ];
+    const out = computeMarkings(items);
+    expect(out['2026-05-13']?.dots).toEqual([{ key: 'a', color: '#FF6B6B' }]);
+    expect(out['2026-05-14']).toBeUndefined();
+  });
 });
 
 describe('itemsOnDate', () => {
@@ -222,6 +255,39 @@ describe('itemsOnDate', () => {
       { kind: 'unavailable_day', user: bob, date: '2026-05-14', title: null },
     ];
     expect(itemsOnDate(items, '2026-05-13')).toHaveLength(1);
+  });
+
+  it('returns multi-day busy_blocks on every spanned day', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: 'trip',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 18, 0),
+        endsAt: new Date(2026, 4, 15, 9, 0),
+        title: 'Hiking',
+      },
+    ];
+    expect(itemsOnDate(items, '2026-05-12')).toHaveLength(0);
+    expect(itemsOnDate(items, '2026-05-13')).toHaveLength(1);
+    expect(itemsOnDate(items, '2026-05-14')).toHaveLength(1);
+    expect(itemsOnDate(items, '2026-05-15')).toHaveLength(1);
+    expect(itemsOnDate(items, '2026-05-16')).toHaveLength(0);
+  });
+
+  it('excludes a day where a block ends exactly at midnight', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: 'late',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 22, 0),
+        endsAt: new Date(2026, 4, 14, 0, 0),
+        title: null,
+      },
+    ];
+    expect(itemsOnDate(items, '2026-05-13')).toHaveLength(1);
+    expect(itemsOnDate(items, '2026-05-14')).toHaveLength(0);
   });
 });
 

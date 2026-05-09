@@ -10,7 +10,7 @@ const mockSupabase = supabase as unknown as { from: jest.Mock };
 function chainable(resolved: unknown) {
   const builder: Record<string, jest.Mock> = {};
   const terminal = Promise.resolve(resolved);
-  for (const name of ['select', 'gte', 'lt']) {
+  for (const name of ['select', 'gte', 'gt', 'lt']) {
     builder[name] = jest.fn().mockReturnValue(builder);
   }
   (builder as { then: unknown }).then = (onFulfilled: unknown, onRejected: unknown) =>
@@ -68,8 +68,11 @@ describe('listCalendarItems', () => {
     expect(error).toBeNull();
     expect(mockSupabase.from).toHaveBeenNthCalledWith(1, 'busy_blocks');
     expect(mockSupabase.from).toHaveBeenNthCalledWith(2, 'unavailable_days');
-    expect(busyBuilder.gte).toHaveBeenCalledWith('starts_at', '2026-05-13');
+    // Overlap query: a block belongs to the window when it starts before
+    // window-end AND ends after window-start. This catches multi-day blocks
+    // that began before fromDate but extend into the range.
     expect(busyBuilder.lt).toHaveBeenCalledWith('starts_at', '2026-05-20');
+    expect(busyBuilder.gt).toHaveBeenCalledWith('ends_at', '2026-05-13');
     expect(daysBuilder.gte).toHaveBeenCalledWith('date', '2026-05-13');
     expect(daysBuilder.lt).toHaveBeenCalledWith('date', '2026-05-20');
 

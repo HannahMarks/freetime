@@ -20,14 +20,23 @@ jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
 }));
 
-// Mock TimePicker so tests can introspect the value it was rendered with
-// and synthesize an onChange call (simulating the user picking a time).
+// Mock TimePicker + DatePicker so tests can introspect the value each was
+// rendered with and synthesize an onChange call (simulating the user
+// picking a time / date).
 type Captured = { testID?: string; value?: Date; onChange?: (d: Date) => void };
 const capturedPickers: Captured[] = [];
+const capturedDatePickers: Captured[] = [];
 
 jest.mock('../components/TimePicker', () => ({
   TimePicker: (props: Captured) => {
     capturedPickers.push(props);
+    return null;
+  },
+}));
+
+jest.mock('../components/DatePicker', () => ({
+  DatePicker: (props: Captured) => {
+    capturedDatePickers.push(props);
     return null;
   },
 }));
@@ -42,6 +51,7 @@ const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 beforeEach(() => {
   jest.clearAllMocks();
   capturedPickers.length = 0;
+  capturedDatePickers.length = 0;
 });
 
 const baseProps = {
@@ -55,6 +65,14 @@ function pickersByTestID() {
   // Pickers can be re-rendered multiple times — find the latest one per testID.
   const map: Record<string, Captured> = {};
   for (const p of capturedPickers) {
+    if (p.testID) map[p.testID] = p;
+  }
+  return map;
+}
+
+function datePickersByTestID() {
+  const map: Record<string, Captured> = {};
+  for (const p of capturedDatePickers) {
     if (p.testID) map[p.testID] = p;
   }
   return map;
@@ -84,9 +102,80 @@ describe('AddItemSheet', () => {
   it('hides time pickers when switched to unavailable-day mode', () => {
     render(<AddItemSheet {...baseProps} />);
     capturedPickers.length = 0;
+    capturedDatePickers.length = 0;
     fireEvent.press(screen.getByTestId('kind-unavailable'));
     expect(capturedPickers).toHaveLength(0);
+    expect(capturedDatePickers).toHaveLength(0);
     expect(screen.getByPlaceholderText('Family wedding')).toBeOnTheScreen();
+  });
+
+  it('renders start + end DatePickers initialized to the selectedDate', () => {
+    render(<AddItemSheet {...baseProps} />);
+    const dates = datePickersByTestID();
+    expect(dates['date-picker-start']?.value?.getFullYear()).toBe(2026);
+    expect(dates['date-picker-start']?.value?.getMonth()).toBe(4);
+    expect(dates['date-picker-start']?.value?.getDate()).toBe(13);
+    expect(dates['date-picker-end']?.value?.getDate()).toBe(13);
+  });
+
+  it('saves a multi-day busy_block when the end date is moved to a later day', async () => {
+    mockedCreateBusy.mockResolvedValue({ error: null });
+    render(<AddItemSheet {...baseProps} />);
+    fireEvent.changeText(screen.getByPlaceholderText('Lunch with Sarah'), 'Hiking trip');
+
+    await act(async () => {
+      const times = pickersByTestID();
+      const dates = datePickersByTestID();
+      times['time-picker-start'].onChange?.(new Date(2026, 4, 13, 18, 0));
+      dates['date-picker-end'].onChange?.(new Date(2026, 4, 15));
+      times['time-picker-end'].onChange?.(new Date(2026, 4, 15, 9, 0));
+    });
+
+    fireEvent.press(screen.getByLabelText('Save'));
+
+    await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalledTimes(1));
+    const call = mockedCreateBusy.mock.calls[0][0];
+    expect(call.title).toBe('Hiking trip');
+    expect(call.startsAt.getDate()).toBe(13);
+    expect(call.startsAt.getHours()).toBe(18);
+    expect(call.endsAt.getDate()).toBe(15);
+    expect(call.endsAt.getHours()).toBe(9);
+  });
+
+  it('preserves the picked time when the start date is changed', async () => {
+    // User picks a time first, then changes the date — the time must
+    // survive the date pick.
+    mockedCreateBusy.mockResolvedValue({ error: null });
+    render(<AddItemSheet {...baseProps} />);
+
+    await act(async () => {
+      const times = pickersByTestID();
+      times['time-picker-start'].onChange?.(new Date(2026, 4, 13, 14, 30));
+    });
+    await act(async () => {
+      const dates = datePickersByTestID();
+      dates['date-picker-start'].onChange?.(new Date(2026, 4, 16));
+    });
+
+    fireEvent.press(screen.getByLabelText('Save'));
+    await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+    const call = mockedCreateBusy.mock.calls[0][0];
+    expect(call.startsAt.getDate()).toBe(16);
+    expect(call.startsAt.getHours()).toBe(14);
+    expect(call.startsAt.getMinutes()).toBe(30);
+  });
+
+  it('toasts and does not save when end is before start across days', async () => {
+    render(<AddItemSheet {...baseProps} />);
+    await act(async () => {
+      const dates = datePickersByTestID();
+      dates['date-picker-end'].onChange?.(new Date(2026, 4, 12)); // earlier than start day
+    });
+    fireEvent.press(screen.getByLabelText('Save'));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/end time must be after/i)),
+    );
+    expect(mockedCreateBusy).not.toHaveBeenCalled();
   });
 
   it('saves a busy_block with the picker-selected times and the title', async () => {
@@ -190,6 +279,21 @@ describe('AddItemSheet', () => {
       const pickers = pickersByTestID();
       expect(pickers['time-picker-start']?.value?.getHours()).toBe(14);
       expect(pickers['time-picker-end']?.value?.getMinutes()).toBe(30);
+    });
+
+    it('pre-fills both date pickers from a multi-day busy_block being edited', () => {
+      const editingTrip: CalendarItem = {
+        kind: 'busy_block',
+        id: 'trip',
+        user: me,
+        startsAt: new Date(2026, 4, 13, 18, 0),
+        endsAt: new Date(2026, 4, 15, 9, 0),
+        title: 'Hiking',
+      };
+      render(<AddItemSheet {...baseProps} editing={editingTrip} />);
+      const dates = datePickersByTestID();
+      expect(dates['date-picker-start']?.value?.getDate()).toBe(13);
+      expect(dates['date-picker-end']?.value?.getDate()).toBe(15);
     });
 
     it('calls updateBusyBlock with the new values when saving an edited busy_block', async () => {
