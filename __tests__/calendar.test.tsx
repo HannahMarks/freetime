@@ -385,6 +385,26 @@ describe('CalendarScreen', () => {
       expect(screen.getByLabelText('Show month grid')).toBeOnTheScreen();
     });
 
+    it('swaps the week strip out for the full grid (never both at once)', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      // Default state: week strip visible, grid hidden.
+      expect(screen.getByTestId('week-strip')).toBeOnTheScreen();
+      expect(screen.queryByTestId('calendar-grid')).toBeNull();
+
+      // Open the grid: week strip hides.
+      fireEvent.press(screen.getByTestId('toggle-month-grid'));
+      expect(screen.queryByTestId('week-strip')).toBeNull();
+      expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
+
+      // Close the grid: week strip comes back.
+      fireEvent.press(screen.getByTestId('toggle-month-grid'));
+      expect(screen.getByTestId('week-strip')).toBeOnTheScreen();
+      expect(screen.queryByTestId('calendar-grid')).toBeNull();
+    });
+
     it("preserves the selected day's items in the timeline while toggling visibility", async () => {
       mockedList.mockResolvedValue({
         data: [

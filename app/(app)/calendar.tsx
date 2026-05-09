@@ -172,15 +172,9 @@ export default function CalendarScreen() {
         </Text>
       </View>
 
-      {/* Week strip — always visible. Sun-Sat for the week containing
-          selectedDate; tap a cell to select that day. */}
-      <WeekStrip
-        selectedDate={selectedDate}
-        todayIso={initial.todayIso}
-        onDateChange={navigateToDate}
-      />
-
-      {/* Month grid — toggled by the chevron. */}
+      {/* Week strip OR full month grid — never both. The full grid
+          already includes everything the week strip shows, so they'd
+          stack redundantly. Chevron toggles between them. */}
       {monthVisible ? (
         <Calendar
           testID="calendar-grid"
@@ -198,7 +192,13 @@ export default function CalendarScreen() {
             selectedDayBackgroundColor: SELECTED_BG,
           }}
         />
-      ) : null}
+      ) : (
+        <WeekStrip
+          selectedDate={selectedDate}
+          todayIso={initial.todayIso}
+          onDateChange={navigateToDate}
+        />
+      )}
 
       {loading ? (
         <View testID="calendar-loading" style={styles.loadingRow}>
