@@ -2,6 +2,7 @@
   "expo": {
     "name": "freetime",
     "slug": "freetime",
+    "scheme": "freetime",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -36,6 +37,12 @@
       "eas": {
         "projectId": "95b7d92f-3e37-49a7-b667-bdee68833088"
       }
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
     }
   }
 }

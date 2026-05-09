@@ -40,12 +40,20 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
-        run: npm ci
+        # --legacy-peer-deps required while Expo SDK 54 has a transitive
+        # react-dom@19.2.6 vs react@19.1.0 peer mismatch. Revisit on next SDK bump.
+        run: npm ci --legacy-peer-deps
 
+      # Pass message via env to avoid YAML treating " #" as a comment in the
+      # bare scalar, and to avoid shell-injection from a crafted PR title.
       - name: Publish production update
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: eas update --branch production --message "${{ github.event.head_commit.message }}" --non-interactive
+        env:
+          UPDATE_MESSAGE: ${{ github.event.head_commit.message }}
+        run: eas update --branch production --message "$UPDATE_MESSAGE" --non-interactive
 
       - name: Publish preview update
         if: github.event_name == 'pull_request'
-        run: eas update --branch preview --message "PR #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}" --non-interactive
+        env:
+          UPDATE_MESSAGE: 'PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}'
+        run: eas update --branch preview --message "$UPDATE_MESSAGE" --non-interactive
