@@ -5,7 +5,7 @@ A shared social calendar between friends. See your friends' availability at a gl
 ## What it is
 
 - **Shared calendar** — your friends' availability is overlaid on yours, color-coded per friend.
-- **Time-range availability** — say "I'm free Saturday 4–6pm" or "fully booked tomorrow". Day-level fully-busy and intra-day free blocks are both first-class.
+- **Busy-time model** — add named activities ("Lunch with Sarah" 12–1pm) or mark a whole day as not free. Default state is free; friends can plan with you unless an activity or unavailable-day says otherwise.
 - **Events + invites** — create, invite, RSVP. The event surfaces who can make it from each friend's calendar.
 - **Per-event photo albums** — only attendees see and contribute.
 - **Social feed** — post photos and short videos from events; friends like and comment.
@@ -101,8 +101,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ Schema for profiles + friendships, with pgTAP test harness ([#5](https://github.com/HannahMarks/freetime/pull/5))
 - ✅ Unit test infrastructure — jest-expo + @testing-library/react-native, CI workflow ([#7](https://github.com/HannahMarks/freetime/pull/7))
 - ✅ Auth flow — email sign up / sign in / sign out, profile creation with display name + hex color picker ([#8](https://github.com/HannahMarks/freetime/pull/8))
-- 🚧 Friends — list, search by name, send / accept / decline / cancel / remove
-- ⏳ Schema for `availability_blocks` (time-range model)
+- ✅ Friends — list, search by name, send / accept / decline / cancel / remove ([#9](https://github.com/HannahMarks/freetime/pull/9))
+- 🚧 Schema for `busy_blocks` (named time-ranged activities) + `unavailable_days` (whole-day floating-date markers) + `is_friend_of()` RLS helper
 - ⏳ Calendar view — read-only, friends' availability overlaid in their colors
 - ⏳ Availability editing — add / edit / delete your own time blocks
 
@@ -126,3 +126,4 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 ## Project conventions
 
 See [CLAUDE.md](./CLAUDE.md) for the working rules: TDD red-green discipline, errors surface as toasts, hobby-tier-only third-party deps, and the README is kept current on every PR.
+
