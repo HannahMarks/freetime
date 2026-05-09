@@ -1,0 +1,38 @@
+name: Database tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/db-test.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/db-test.yml'
+
+concurrency:
+  group: db-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pgTAP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase stack
+        run: supabase start --workdir .
+
+      - name: Run pgTAP tests
+        run: supabase test db --workdir .
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --workdir . || true
