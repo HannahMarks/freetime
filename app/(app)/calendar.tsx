@@ -236,6 +236,11 @@ export default function CalendarScreen() {
             pagingEnabled
             pastScrollRange={12}
             futureScrollRange={12}
+            // Our outer chevron + month label IS the header. The
+            // package's per-month header (month name + < > arrows
+            // inside the grid) is redundant — hide it.
+            renderHeader={() => null}
+            hideArrows
             onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
             onVisibleMonthsChange={(months: DateData[]) => {
               if (months.length > 0) {
