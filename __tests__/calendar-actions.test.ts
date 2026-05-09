@@ -37,7 +37,7 @@ describe('listCalendarItems', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it('queries both tables with the date window and returns merged items', async () => {
+  it('queries both tables with the date window and returns merged items including notes + location', async () => {
     const busyBuilder = chainable({
       data: [
         {
@@ -46,13 +46,23 @@ describe('listCalendarItems', () => {
           title: 'Lunch',
           starts_at: '2026-05-13T12:00:00Z',
           ends_at: '2026-05-13T13:00:00Z',
+          notes: 'Bring deck',
+          location: 'Cafe Borrone',
           user: alice,
         },
       ],
       error: null,
     });
     const daysBuilder = chainable({
-      data: [{ user_id: bob.id, date: '2026-05-15', title: 'Wedding', user: bob }],
+      data: [
+        {
+          user_id: bob.id,
+          date: '2026-05-15',
+          title: 'Wedding',
+          notes: 'Black tie, downtown',
+          user: bob,
+        },
+      ],
       error: null,
     });
 
@@ -76,6 +86,12 @@ describe('listCalendarItems', () => {
     expect(daysBuilder.gte).toHaveBeenCalledWith('date', '2026-05-13');
     expect(daysBuilder.lt).toHaveBeenCalledWith('date', '2026-05-20');
 
+    // The select clauses must request notes + location so they're available
+    // client-side without a second round-trip.
+    expect(busyBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/notes/));
+    expect(busyBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/location/));
+    expect(daysBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/notes/));
+
     expect(data).toHaveLength(2);
     const busy = data!.find((i) => i.kind === 'busy_block');
     const day = data!.find((i) => i.kind === 'unavailable_day');
@@ -84,6 +100,8 @@ describe('listCalendarItems', () => {
       id: 'bb1',
       user: alice,
       title: 'Lunch',
+      notes: 'Bring deck',
+      location: 'Cafe Borrone',
     });
     if (busy?.kind === 'busy_block') {
       expect(busy.startsAt).toBeInstanceOf(Date);
@@ -94,6 +112,7 @@ describe('listCalendarItems', () => {
       user: bob,
       date: '2026-05-15',
       title: 'Wedding',
+      notes: 'Black tie, downtown',
     });
   });
 
