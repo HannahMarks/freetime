@@ -47,6 +47,36 @@ jest.mock('react-native-calendars', () => {
   };
 });
 
+// Mock the carousel as a thin shim that renders only the centered pane,
+// so existing day-block testID assertions (which expected one DayTimeline
+// per screen) keep working. The horizontal-swipe gesture is verified
+// manually on device — not jest-testable.
+jest.mock('../components/SwipeableDayCarousel', () => {
+  const React = require('react');
+  const { DayTimeline } = require('../components/DayTimeline');
+  const { itemsOnDate } = require('../lib/calendar-helpers');
+  return {
+    SwipeableDayCarousel: (props: {
+      date: string;
+      items: unknown[];
+      currentUserId?: string;
+      onItemPress?: unknown;
+      onItemReschedule?: unknown;
+      refreshControl?: unknown;
+    }) => {
+      const dayItems = itemsOnDate(props.items as never[], props.date);
+      return React.createElement(DayTimeline, {
+        date: props.date,
+        items: dayItems,
+        currentUserId: props.currentUserId,
+        onItemPress: props.onItemPress,
+        onItemReschedule: props.onItemReschedule,
+        refreshControl: props.refreshControl,
+      });
+    },
+  };
+});
+
 const mockedList = listCalendarItems as jest.MockedFunction<typeof listCalendarItems>;
 const mockedDeleteBusy = deleteBusyBlock as jest.MockedFunction<typeof deleteBusyBlock>;
 
@@ -71,6 +101,12 @@ async function flushAsync() {
   });
 }
 
+/** The month grid is hidden by default — many tests need it open to
+ * read the captured Calendar props or fire its onDayPress / onMonthChange. */
+function showGrid() {
+  fireEvent.press(screen.getByTestId('toggle-month-grid'));
+}
+
 describe('CalendarScreen', () => {
   it('fetches the current month range on mount', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
@@ -87,6 +123,7 @@ describe('CalendarScreen', () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
+    showGrid();
 
     expect(lastCalendarProps.current).toBe('2026-05-01');
   });
@@ -95,6 +132,7 @@ describe('CalendarScreen', () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
+    showGrid();
 
     const todayMarking = (lastCalendarProps.markedDates as { [k: string]: { selected?: boolean } })[
       '2026-05-13'
@@ -102,12 +140,54 @@ describe('CalendarScreen', () => {
     expect(todayMarking.selected).toBe(true);
   });
 
-  it('renders the day label header for the selected day', async () => {
+  it('renders the month label in the header', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
 
-    expect(screen.getByText('Today')).toBeOnTheScreen();
+    // Locale-dependent exact format — assert it contains the year and "May"
+    // (the test clock is set to 2026-05-13).
+    const label = screen.getByTestId('month-label');
+    expect(label.props.children).toMatch(/May/);
+    expect(label.props.children).toMatch(/2026/);
+  });
+
+  it('renders the week strip with the selected day highlighted', async () => {
+    mockedList.mockResolvedValue({ data: [], error: null });
+    render(<CalendarScreen />);
+    await flushAsync();
+
+    expect(screen.getByTestId('week-strip')).toBeOnTheScreen();
+    // Today (May 13 2026) should be visible as a week-strip cell.
+    expect(screen.getByTestId('week-cell-2026-05-13')).toBeOnTheScreen();
+  });
+
+  it('changes the selected day when a week-strip cell is tapped', async () => {
+    mockedList.mockResolvedValue({
+      data: [
+        {
+          kind: 'busy_block',
+          id: 'bb1',
+          user: bob,
+          startsAt: new Date(2026, 4, 15, 16, 0),
+          endsAt: new Date(2026, 4, 15, 17, 0),
+          title: 'Coffee',
+          notes: null,
+          location: null,
+        },
+      ],
+      error: null,
+    });
+    render(<CalendarScreen />);
+    await flushAsync();
+
+    expect(screen.queryByTestId('day-block-bb1')).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('week-cell-2026-05-15'));
+    });
+
+    expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
   });
 
   it('renders the DayTimeline with the selected day items', async () => {
@@ -166,6 +246,7 @@ describe('CalendarScreen', () => {
     });
     render(<CalendarScreen />);
     await flushAsync();
+    showGrid();
 
     const may14 = (lastCalendarProps.markedDates as { [k: string]: { dots?: { color: string }[] } })[
       '2026-05-14'
@@ -197,6 +278,7 @@ describe('CalendarScreen', () => {
     });
     render(<CalendarScreen />);
     await flushAsync();
+    showGrid();
 
     // Today (May 13) selected initially → Bob's coffee on May 15 isn't visible.
     expect(screen.queryByTestId('day-block-bb1')).toBeNull();
@@ -233,27 +315,28 @@ describe('CalendarScreen', () => {
 
     // Middle day.
     await act(async () => {
-      lastCalendarProps.onDayPress?.({ dateString: '2026-05-14' });
+      fireEvent.press(screen.getByTestId('week-cell-2026-05-14'));
     });
     expect(screen.getByTestId('day-block-trip')).toBeOnTheScreen();
 
     // End day.
     await act(async () => {
-      lastCalendarProps.onDayPress?.({ dateString: '2026-05-15' });
+      fireEvent.press(screen.getByTestId('week-cell-2026-05-15'));
     });
     expect(screen.getByTestId('day-block-trip')).toBeOnTheScreen();
 
     // Day after — block should be gone.
     await act(async () => {
-      lastCalendarProps.onDayPress?.({ dateString: '2026-05-16' });
+      fireEvent.press(screen.getByTestId('week-cell-2026-05-16'));
     });
     expect(screen.queryByTestId('day-block-trip')).toBeNull();
   });
 
-  it('refetches when the user navigates to a new month', async () => {
+  it('refetches when the user navigates to a new month via the grid', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
+    showGrid();
 
     expect(mockedList).toHaveBeenCalledTimes(1);
 
@@ -268,26 +351,28 @@ describe('CalendarScreen', () => {
     });
   });
 
+
   describe('month-grid collapse toggle', () => {
-    it('renders the month grid by default', async () => {
+    it('hides the month grid by default (week strip is the primary day-picker)', async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
-      expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
+      expect(screen.queryByTestId('calendar-grid')).toBeNull();
+      expect(screen.getByLabelText('Show month grid')).toBeOnTheScreen();
     });
 
-    it("hides the month grid when the toggle is tapped, and updates the accessibility label", async () => {
+    it('shows the month grid when the toggle is tapped, and flips the accessibility label', async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
 
       fireEvent.press(screen.getByTestId('toggle-month-grid'));
 
-      expect(screen.queryByTestId('calendar-grid')).toBeNull();
-      expect(screen.getByLabelText('Show month grid')).toBeOnTheScreen();
+      expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
+      expect(screen.getByLabelText('Hide month grid')).toBeOnTheScreen();
     });
 
-    it("shows the month grid again on a second tap, and reverts the accessibility label", async () => {
+    it('hides the grid again on a second tap', async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
@@ -296,8 +381,8 @@ describe('CalendarScreen', () => {
       fireEvent.press(toggle);
       fireEvent.press(toggle);
 
-      expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
-      expect(screen.getByLabelText('Hide month grid')).toBeOnTheScreen();
+      expect(screen.queryByTestId('calendar-grid')).toBeNull();
+      expect(screen.getByLabelText('Show month grid')).toBeOnTheScreen();
     });
 
     it("preserves the selected day's items in the timeline while toggling visibility", async () => {
