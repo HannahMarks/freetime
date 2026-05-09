@@ -39,27 +39,28 @@ describe('CalendarScreen', () => {
     expect(screen.getByTestId('calendar-loading')).toBeOnTheScreen();
   });
 
-  it('renders 7 day sections after data loads, with empty days marked Free', async () => {
+  it('renders 30 day sections after data loads, with empty days marked Free', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
 
     expect(screen.getByText('Today')).toBeOnTheScreen();
     expect(screen.getByText('Tomorrow')).toBeOnTheScreen();
-    // 7 days - today - tomorrow = 5 weekday-formatted labels remaining
-    // Each empty day shows "Free"
+    // 30 days, all empty → 30 "Free" placeholders.
     const frees = screen.getAllByText('Free');
-    expect(frees).toHaveLength(7);
+    expect(frees).toHaveLength(30);
   });
 
-  it('fetches the next 7 days starting today and ending exclusive of day 8', async () => {
+  it('fetches the next 30 days starting today and ending exclusive of day 31', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
 
+    // Today is 2026-05-13; window is [today, today+30); today+29 = 2026-06-11
+    // → exclusive end is 2026-06-12.
     expect(mockedList).toHaveBeenCalledWith({
       fromDate: '2026-05-13',
-      toDate: '2026-05-20', // day after the last (May 19) included day
+      toDate: '2026-06-12',
     });
   });
 

@@ -18,7 +18,9 @@ import {
 } from '../../lib/calendar-helpers';
 import { toast } from '../../lib/toast';
 
-const WINDOW_DAYS = 7;
+// 30-day rolling window. Bump again or add real date navigation when
+// users want to plan further ahead than a month.
+const WINDOW_DAYS = 30;
 
 export default function CalendarScreen() {
   const [agenda, setAgenda] = useState<DayAgenda[] | null>(null);
