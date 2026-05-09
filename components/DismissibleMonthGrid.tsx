@@ -64,21 +64,25 @@ export function DismissibleMonthGrid({ onDismiss, children }: Props) {
 
   return (
     <Animated.View testID="dismissible-month-grid" style={animatedStyle}>
+      {children}
       <GestureDetector gesture={pan}>
-        {/* Dedicated drag-handle area. Tappable surface (~28px tall) so
-            the handle is easy to grab; the visible bar inside is smaller.
-            collapsable={false} keeps the View as a real Android host. */}
+        {/* Dedicated drag-handle area, sits BELOW the calendar so the
+            user can drag from the closer-to-center-of-screen edge — the
+            top of the calendar tends to be too far up to drag past the
+            dismiss threshold comfortably. The handle area is ~28px tall;
+            the visible bar inside is smaller. collapsable={false} keeps
+            the View as a real Android host so the gesture-handler
+            reliably receives touches. */}
         <View
           testID="dismiss-handle"
           collapsable={false}
           style={styles.handleArea}
           accessibilityRole="adjustable"
-          accessibilityLabel="Drag down to hide the month grid"
+          accessibilityLabel="Drag up to hide the month grid"
         >
           <View style={styles.handleBar} />
         </View>
       </GestureDetector>
-      {children}
     </Animated.View>
   );
 }
