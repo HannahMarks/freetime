@@ -101,10 +101,23 @@ create policy "users can DELETE only their own busy_blocks"
 create table public.unavailable_days (
   user_id uuid not null references public.profiles(id) on delete cascade,
   date date not null,
+  title text,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
 
-  primary key (user_id, date)
+  primary key (user_id, date),
+  -- Same shape as busy_blocks.title: nullable means "unavailable, no
+  -- label" (UI can render as "Not free"); when set, must not be
+  -- all-whitespace.
+  constraint unavailable_days_title_not_blank check (
+    title is null or length(trim(title)) > 0
+  )
 );
+
+create trigger unavailable_days_set_updated_at
+  before update on public.unavailable_days
+  for each row
+  execute function public.tg_set_updated_at();
 
 alter table public.unavailable_days enable row level security;
 
@@ -120,8 +133,12 @@ create policy "users can INSERT only their own unavailable_days"
   to authenticated
   with check (user_id = auth.uid());
 
--- No UPDATE policy — the (user_id, date) PK is the row's identity; to
--- "edit" you delete and re-insert.
+create policy "users can UPDATE only their own unavailable_days"
+  on public.unavailable_days
+  for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
 create policy "users can DELETE only their own unavailable_days"
   on public.unavailable_days

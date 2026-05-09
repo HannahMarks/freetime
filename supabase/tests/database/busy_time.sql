@@ -4,7 +4,7 @@
 
 begin;
 
-select plan(34);
+select plan(38);
 
 -- ────────────────────────────────────────────────────────────────────
 -- busy_blocks schema shape
@@ -35,8 +35,11 @@ select is(
 select has_table('public', 'unavailable_days', 'unavailable_days table exists');
 select has_column('public', 'unavailable_days', 'user_id', 'unavailable_days has user_id');
 select has_column('public', 'unavailable_days', 'date', 'unavailable_days has date');
+select has_column('public', 'unavailable_days', 'title', 'unavailable_days has title');
+select has_column('public', 'unavailable_days', 'updated_at', 'unavailable_days has updated_at');
 select col_type_is('public', 'unavailable_days', 'date', 'date',
   'date column is type date (floating, no time zone)');
+select col_type_is('public', 'unavailable_days', 'title', 'text', 'title is text');
 
 select is(
   (select relrowsecurity from pg_class where oid = 'public.unavailable_days'::regclass),
@@ -115,6 +118,15 @@ select throws_ok(
   '23505',
   null,
   'unavailable_days (user_id, date) PK rejects duplicate'
+);
+
+-- title CHECK on unavailable_days: whitespace-only is rejected.
+select throws_ok(
+  $$insert into public.unavailable_days (user_id, date, title)
+    values ('00000000-0000-0000-0000-00000000aaa1', current_date + interval '4 days', '   ')$$,
+  '23514',
+  null,
+  'whitespace-only title on unavailable_days rejected by check'
 );
 
 -- ────────────────────────────────────────────────────────────────────

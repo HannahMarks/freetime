@@ -5,7 +5,7 @@ A shared social calendar between friends. See your friends' availability at a gl
 ## What it is
 
 - **Shared calendar** — your friends' availability is overlaid on yours, color-coded per friend.
-- **Busy-time model** — add named activities ("Lunch with Sarah" 12–1pm) or mark a whole day as not free. Default state is free; friends can plan with you unless an activity or unavailable-day says otherwise.
+- **Busy-time model** — add named activities ("Lunch with Sarah" 12–1pm) or mark a whole day as not free (also with an optional label, e.g. "Family wedding"). Default state is free; friends can plan with you unless an activity or unavailable-day says otherwise.
 - **Events + invites** — create, invite, RSVP. The event surfaces who can make it from each friend's calendar.
 - **Per-event photo albums** — only attendees see and contribute.
 - **Social feed** — post photos and short videos from events; friends like and comment.
