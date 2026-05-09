@@ -126,3 +126,4 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 ## Project conventions
 
 See [CLAUDE.md](./CLAUDE.md) for the working rules: TDD red-green discipline, errors surface as toasts, hobby-tier-only third-party deps, and the README is kept current on every PR.
+
