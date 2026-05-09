@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +15,8 @@ import {
 import {
   createBusyBlock,
   createUnavailableDay,
+  deleteBusyBlock,
+  deleteUnavailableDay,
   updateBusyBlock,
   updateUnavailableDay,
 } from '../lib/availability-actions';
@@ -29,9 +34,11 @@ type Props = {
    * If set, the sheet pre-fills with this item and saves via the update
    * path instead of create. The kind toggle is hidden in edit mode (a
    * busy_block stays a busy_block; switching kinds is delete + re-add).
+   * Edit mode also reveals a Delete button in the footer.
    */
   editing?: CalendarItem | null;
   onClose: () => void;
+  /** Fires after a successful save OR delete. Parent should refetch. */
   onSaved: () => void;
 };
 
@@ -71,10 +78,11 @@ function withTime(prev: Date, picked: Date): Date {
 }
 
 /**
- * Modal sheet for adding OR editing either a busy_block (with start/end
- * times + optional title) or an unavailable_day (just an optional title)
- * on the currently-selected calendar date. Native scroll-wheel time
- * pickers via `TimePicker`.
+ * Full-page modal for adding OR editing a busy_block or unavailable_day.
+ * Header has a Close (×) button + the heading; body has the form fields;
+ * footer has Save and (in edit mode) a destructive Delete button. Tapping
+ * an existing item from the calendar opens this sheet directly in edit
+ * mode — there is no separate edit-or-delete action sheet.
  */
 export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved }: Props) {
   const editingKind: Kind | null = editing
@@ -160,23 +168,66 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     }
   }
 
+  function handleDelete() {
+    if (!editing || submitting) return;
+    Alert.alert('Delete this item?', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setSubmitting(true);
+          try {
+            const { error } =
+              editing.kind === 'busy_block'
+                ? await deleteBusyBlock(editing.id)
+                : await deleteUnavailableDay({ userId: editing.user.id, date: editing.date });
+            if (error) {
+              toast.error(error);
+              return;
+            }
+            onSaved();
+            onClose();
+          } finally {
+            setSubmitting(false);
+          }
+        },
+      },
+    ]);
+  }
+
   const heading = editing ? 'Edit' : 'Add to your day';
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={onClose}
-          accessibilityLabel="Dismiss"
-        />
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      presentationStyle="pageSheet"
+    >
+      <SafeAreaView style={styles.container} testID="add-item-sheet">
+        <View style={styles.header}>
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            hitSlop={12}
+            style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
+          >
+            <Text style={styles.closeIcon}>×</Text>
+          </Pressable>
+          <Text style={styles.heading}>{heading}</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheetWrap}
+          style={styles.flex}
         >
-          <View style={styles.sheet} testID="add-item-sheet">
-            <Text style={styles.heading}>{heading}</Text>
-
+          <ScrollView
+            contentContainerStyle={styles.body}
+            keyboardShouldPersistTaps="handled"
+          >
             {!editing ? (
               <View style={styles.toggleRow}>
                 <Pressable
@@ -248,54 +299,71 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 </View>
               </>
             ) : null}
-
-            <View style={styles.actions}>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel"
-                style={({ pressed }) => [styles.cancel, pressed && styles.cancelPressed]}
-              >
-                <Text style={styles.cancelLabel}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleSave}
-                accessibilityRole="button"
-                accessibilityLabel="Save"
-                disabled={submitting}
-                style={({ pressed }) => [
-                  styles.save,
-                  pressed && styles.savePressed,
-                  submitting && styles.saveDisabled,
-                ]}
-              >
-                <Text style={styles.saveLabel}>{submitting ? 'Saving…' : 'Save'}</Text>
-              </Pressable>
-            </View>
-          </View>
+          </ScrollView>
         </KeyboardAvoidingView>
-      </View>
+
+        <View style={styles.footer}>
+          <Pressable
+            onPress={handleSave}
+            accessibilityRole="button"
+            accessibilityLabel="Save"
+            disabled={submitting}
+            style={({ pressed }) => [
+              styles.save,
+              pressed && styles.savePressed,
+              submitting && styles.saveDisabled,
+            ]}
+          >
+            <Text style={styles.saveLabel}>{submitting ? 'Saving…' : 'Save'}</Text>
+          </Pressable>
+          {editing ? (
+            <Pressable
+              onPress={handleDelete}
+              accessibilityRole="button"
+              accessibilityLabel="Delete"
+              disabled={submitting}
+              style={({ pressed }) => [
+                styles.delete,
+                pressed && styles.deletePressed,
+                submitting && styles.deleteDisabled,
+              ]}
+            >
+              <Text style={styles.deleteLabel}>Delete</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
+  container: { flex: 1, backgroundColor: '#fff' },
+  flex: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
   },
-  sheetWrap: {},
-  sheet: {
-    backgroundColor: '#fff',
+  closeButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+  },
+  closeButtonPressed: { backgroundColor: '#f0f0f0' },
+  closeIcon: { fontSize: 28, lineHeight: 30, color: '#111', fontWeight: '300' },
+  heading: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600', color: '#111' },
+  headerSpacer: { width: 36, height: 36 },
+  body: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 32,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    gap: 14,
+    paddingVertical: 16,
+    gap: 16,
   },
-  heading: { fontSize: 18, fontWeight: '700', color: '#111' },
   toggleRow: { flexDirection: 'row', gap: 8 },
   toggle: {
     flex: 1,
@@ -329,25 +397,31 @@ const styles = StyleSheet.create({
     gap: 8,
     flexShrink: 1,
   },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  cancel: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    alignItems: 'center',
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#eee',
+    gap: 10,
   },
-  cancelPressed: { opacity: 0.7 },
-  cancelLabel: { fontSize: 15, color: '#111' },
   save: {
-    flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 8,
     backgroundColor: '#111',
     alignItems: 'center',
   },
   savePressed: { opacity: 0.85 },
   saveDisabled: { opacity: 0.5 },
-  saveLabel: { fontSize: 15, color: '#fff', fontWeight: '600' },
+  saveLabel: { fontSize: 16, color: '#fff', fontWeight: '600' },
+  delete: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d92d20',
+    alignItems: 'center',
+  },
+  deletePressed: { backgroundColor: '#fff5f5' },
+  deleteDisabled: { opacity: 0.5 },
+  deleteLabel: { fontSize: 16, color: '#d92d20', fontWeight: '600' },
 });

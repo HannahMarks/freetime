@@ -1,10 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import CalendarScreen from '../app/(app)/calendar';
-import {
-  deleteBusyBlock,
-  deleteUnavailableDay,
-} from '../lib/availability-actions';
+import { deleteBusyBlock } from '../lib/availability-actions';
 import { listCalendarItems } from '../lib/calendar-actions';
 import { toast } from '../lib/toast';
 
@@ -52,7 +49,6 @@ jest.mock('react-native-calendars', () => {
 
 const mockedList = listCalendarItems as jest.MockedFunction<typeof listCalendarItems>;
 const mockedDeleteBusy = deleteBusyBlock as jest.MockedFunction<typeof deleteBusyBlock>;
-const mockedDeleteDay = deleteUnavailableDay as jest.MockedFunction<typeof deleteUnavailableDay>;
 
 const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 
@@ -316,7 +312,7 @@ describe('CalendarScreen', () => {
   });
 
   describe('add + delete flows', () => {
-    it('opens the add sheet when the FAB is pressed and dismisses on Cancel', async () => {
+    it('opens the add sheet when the FAB is pressed and dismisses on Close', async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
@@ -326,7 +322,7 @@ describe('CalendarScreen', () => {
       fireEvent.press(screen.getByTestId('add-fab'));
       expect(screen.getByTestId('add-item-sheet')).toBeOnTheScreen();
 
-      fireEvent.press(screen.getByLabelText('Cancel'));
+      fireEvent.press(screen.getByLabelText('Close'));
       await waitFor(() => expect(screen.queryByTestId('add-item-sheet')).toBeNull());
     });
 
@@ -340,7 +336,7 @@ describe('CalendarScreen', () => {
       expect(fab).toHaveStyle({ backgroundColor: '#9C27B0' });
     });
 
-    it('opens the add sheet in edit mode when "Edit" is chosen on a tap', async () => {
+    it("opens the edit sheet directly when the user taps their own item (no action sheet)", async () => {
       mockedList.mockResolvedValue({
         data: [
           {
@@ -354,52 +350,17 @@ describe('CalendarScreen', () => {
         ],
         error: null,
       });
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const editBtn = (buttons ?? []).find((b) => b.text === 'Edit');
-        editBtn?.onPress?.();
-      });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<CalendarScreen />);
       await flushAsync();
 
       fireEvent.press(screen.getByTestId('day-block-bb1'));
 
-      // Sheet opens; AddItemSheet renders the heading "Edit" when editing is set.
+      // No Alert.alert action sheet — the sheet opens directly in edit mode.
+      expect(alertSpy).not.toHaveBeenCalled();
       expect(screen.getByText('Edit')).toBeOnTheScreen();
-      // The pre-filled title is visible.
       expect(screen.getByDisplayValue('Standup')).toBeOnTheScreen();
-
-      alertSpy.mockRestore();
-    });
-
-    it("confirms-then-deletes the user's own busy_block when tapped", async () => {
-      mockedList.mockResolvedValue({
-        data: [
-          {
-            kind: 'busy_block',
-            id: 'bb1',
-            user: me,
-            startsAt: new Date(2026, 4, 13, 9, 0),
-            endsAt: new Date(2026, 4, 13, 10, 0),
-            title: 'Standup',
-          },
-        ],
-        error: null,
-      });
-      mockedDeleteBusy.mockResolvedValue({ error: null });
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
-        destructive?.onPress?.();
-      });
-
-      render(<CalendarScreen />);
-      await flushAsync();
-
-      fireEvent.press(screen.getByTestId('day-block-bb1'));
-
-      await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
-      // listFriendships fires once on mount + again after delete.
-      await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
 
       alertSpy.mockRestore();
     });
@@ -418,43 +379,37 @@ describe('CalendarScreen', () => {
         ],
         error: null,
       });
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<CalendarScreen />);
       await flushAsync();
 
       fireEvent.press(screen.getByTestId('day-block-bb1'));
 
-      expect(alertSpy).not.toHaveBeenCalled();
+      // No sheet opens — the heading would be visible if it had.
+      expect(screen.queryByTestId('add-item-sheet')).toBeNull();
       expect(mockedDeleteBusy).not.toHaveBeenCalled();
-
-      alertSpy.mockRestore();
     });
 
-    it("confirms-then-deletes the user's own unavailable_day when the banner is tapped", async () => {
+    it("opens the edit sheet directly when the user taps their own unavailable_day banner", async () => {
       mockedList.mockResolvedValue({
         data: [{ kind: 'unavailable_day', user: me, date: '2026-05-13', title: 'PTO' }],
         error: null,
       });
-      mockedDeleteDay.mockResolvedValue({ error: null });
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
-        destructive?.onPress?.();
-      });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
       render(<CalendarScreen />);
       await flushAsync();
 
       fireEvent.press(screen.getByTestId('day-banner-me-id'));
 
-      await waitFor(() =>
-        expect(mockedDeleteDay).toHaveBeenCalledWith({ userId: 'me-id', date: '2026-05-13' }),
-      );
+      expect(alertSpy).not.toHaveBeenCalled();
+      expect(screen.getByText('Edit')).toBeOnTheScreen();
+      expect(screen.getByDisplayValue('PTO')).toBeOnTheScreen();
 
       alertSpy.mockRestore();
     });
 
-    it('toasts when the delete action fails', async () => {
+    it('refetches the calendar when the sheet reports a delete', async () => {
       mockedList.mockResolvedValue({
         data: [
           {
@@ -463,13 +418,14 @@ describe('CalendarScreen', () => {
             user: me,
             startsAt: new Date(2026, 4, 13, 9, 0),
             endsAt: new Date(2026, 4, 13, 10, 0),
-            title: null,
+            title: 'Standup',
           },
         ],
         error: null,
       });
-      mockedDeleteBusy.mockResolvedValue({ error: 'Server is grumpy' });
+      mockedDeleteBusy.mockResolvedValue({ error: null });
       const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        // The Delete-confirm Alert: take the destructive branch.
         const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
         destructive?.onPress?.();
       });
@@ -478,8 +434,12 @@ describe('CalendarScreen', () => {
       await flushAsync();
 
       fireEvent.press(screen.getByTestId('day-block-bb1'));
+      fireEvent.press(screen.getByLabelText('Delete'));
 
-      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
+      await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
+      // Initial mount fetch + post-delete refetch.
+      await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
+
       alertSpy.mockRestore();
     });
   });

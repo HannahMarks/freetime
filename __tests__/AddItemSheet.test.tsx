@@ -1,8 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 import { AddItemSheet } from '../components/AddItemSheet';
 import {
   createBusyBlock,
   createUnavailableDay,
+  deleteBusyBlock,
+  deleteUnavailableDay,
   updateBusyBlock,
   updateUnavailableDay,
 } from '../lib/availability-actions';
@@ -14,6 +17,8 @@ jest.mock('../lib/availability-actions', () => ({
   createUnavailableDay: jest.fn(),
   updateBusyBlock: jest.fn(),
   updateUnavailableDay: jest.fn(),
+  deleteBusyBlock: jest.fn(),
+  deleteUnavailableDay: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -45,6 +50,8 @@ const mockedCreateBusy = createBusyBlock as jest.MockedFunction<typeof createBus
 const mockedCreateUnavail = createUnavailableDay as jest.MockedFunction<typeof createUnavailableDay>;
 const mockedUpdateBusy = updateBusyBlock as jest.MockedFunction<typeof updateBusyBlock>;
 const mockedUpdateUnavail = updateUnavailableDay as jest.MockedFunction<typeof updateUnavailableDay>;
+const mockedDeleteBusy = deleteBusyBlock as jest.MockedFunction<typeof deleteBusyBlock>;
+const mockedDeleteUnavail = deleteUnavailableDay as jest.MockedFunction<typeof deleteUnavailableDay>;
 
 const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 
@@ -82,6 +89,16 @@ describe('AddItemSheet', () => {
   it("doesn't render anything when visible is false", () => {
     render(<AddItemSheet {...baseProps} visible={false} />);
     expect(screen.queryByTestId('add-item-sheet')).toBeNull();
+  });
+
+  it('closes without saving when the Close button is pressed', async () => {
+    const onClose = jest.fn();
+    const onSaved = jest.fn();
+    render(<AddItemSheet {...baseProps} onClose={onClose} onSaved={onSaved} />);
+    fireEvent.press(screen.getByLabelText('Close'));
+    expect(onClose).toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(mockedCreateBusy).not.toHaveBeenCalled();
   });
 
   it('defaults to busy-time mode and renders start + end TimePickers initialized to 9:00–10:00 on the selected day', () => {
@@ -350,6 +367,96 @@ describe('AddItemSheet', () => {
           title: 'Sick day',
         }),
       );
+    });
+
+    it('renders a Delete button only in edit mode', () => {
+      const { rerender } = render(<AddItemSheet {...baseProps} />);
+      expect(screen.queryByLabelText('Delete')).toBeNull();
+      rerender(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      expect(screen.getByLabelText('Delete')).toBeOnTheScreen();
+    });
+
+    it('confirms-then-deletes a busy_block via the Delete button', async () => {
+      mockedDeleteBusy.mockResolvedValue({ error: null });
+      const onSaved = jest.fn();
+      const onClose = jest.fn();
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+        destructive?.onPress?.();
+      });
+
+      render(
+        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+      );
+      fireEvent.press(screen.getByLabelText('Delete'));
+
+      // Alert was raised for confirmation.
+      expect(alertSpy).toHaveBeenCalled();
+      await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
+      // Sheet closes after delete completes.
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+      alertSpy.mockRestore();
+    });
+
+    it('confirms-then-deletes an unavailable_day via the Delete button', async () => {
+      mockedDeleteUnavail.mockResolvedValue({ error: null });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+        destructive?.onPress?.();
+      });
+
+      render(<AddItemSheet {...baseProps} editing={editingDay} />);
+      fireEvent.press(screen.getByLabelText('Delete'));
+
+      await waitFor(() =>
+        expect(mockedDeleteUnavail).toHaveBeenCalledWith({
+          userId: 'me-id',
+          date: '2026-05-13',
+        }),
+      );
+
+      alertSpy.mockRestore();
+    });
+
+    it("does not delete when the Alert's Cancel button is chosen", async () => {
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const cancelBtn = (buttons ?? []).find((b) => b.style === 'cancel');
+        cancelBtn?.onPress?.();
+      });
+
+      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      fireEvent.press(screen.getByLabelText('Delete'));
+
+      // Brief flush — confirm we don't sneak a delete in.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockedDeleteBusy).not.toHaveBeenCalled();
+
+      alertSpy.mockRestore();
+    });
+
+    it('toasts and stays open when the delete action fails', async () => {
+      mockedDeleteBusy.mockResolvedValue({ error: 'Server is grumpy' });
+      const onSaved = jest.fn();
+      const onClose = jest.fn();
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+        destructive?.onPress?.();
+      });
+
+      render(
+        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+      );
+      fireEvent.press(screen.getByLabelText('Delete'));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
+      expect(onSaved).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+
+      alertSpy.mockRestore();
     });
   });
 

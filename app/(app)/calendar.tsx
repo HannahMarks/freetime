@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -12,10 +11,6 @@ import { Calendar, DateData } from 'react-native-calendars';
 import { AddItemSheet } from '../../components/AddItemSheet';
 import { DayTimeline } from '../../components/DayTimeline';
 import { useAuth } from '../../lib/auth';
-import {
-  deleteBusyBlock,
-  deleteUnavailableDay,
-} from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
 import {
   CalendarItem,
@@ -81,36 +76,12 @@ export default function CalendarScreen() {
   }
 
   function handleItemPress(item: CalendarItem) {
-    // Only the owner can edit / delete. RLS would block server-side too, but
-    // the UI gate avoids surfacing an action sheet on a friend's item.
+    // Only the owner can edit / delete; RLS blocks server-side, this is the
+    // UI gate. Tapping your own item opens the edit sheet directly — Edit
+    // and Delete both live inside the sheet.
     if (item.user.id !== session?.user.id) return;
-
-    const label = item.kind === 'busy_block' ? (item.title ?? 'Busy time') : (item.title ?? 'Unavailable day');
-    Alert.alert(label, undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Edit',
-        onPress: () => {
-          setEditing(item);
-          setAddOpen(true);
-        },
-      },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          const result =
-            item.kind === 'busy_block'
-              ? await deleteBusyBlock(item.id)
-              : await deleteUnavailableDay({ userId: item.user.id, date: item.date });
-          if (result.error) {
-            toast.error(result.error);
-            return;
-          }
-          await fetchMonth();
-        },
-      },
-    ]);
+    setEditing(item);
+    setAddOpen(true);
   }
 
   function closeAddSheet() {
