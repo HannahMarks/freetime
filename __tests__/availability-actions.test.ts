@@ -3,6 +3,8 @@ import {
   createUnavailableDay,
   deleteBusyBlock,
   deleteUnavailableDay,
+  updateBusyBlock,
+  updateUnavailableDay,
 } from '../lib/availability-actions';
 import { supabase } from '../lib/supabase';
 
@@ -21,7 +23,7 @@ const mockSupabase = supabase as unknown as {
 function chainable(resolved: unknown) {
   const builder: Record<string, jest.Mock> = {};
   const terminal = Promise.resolve(resolved);
-  for (const name of ['select', 'insert', 'delete', 'eq']) {
+  for (const name of ['select', 'insert', 'update', 'delete', 'eq']) {
     builder[name] = jest.fn().mockReturnValue(builder);
   }
   (builder as { then: unknown }).then = (onFulfilled: unknown, onRejected: unknown) =>
@@ -114,6 +116,61 @@ describe('availability-actions', () => {
       mockSupabase.auth.getUser.mockResolvedValue({ data: { user: null } });
       const { error } = await createUnavailableDay({ date: '2026-05-13', title: null });
       expect(error).toMatch(/not signed in/i);
+    });
+  });
+
+  describe('updateBusyBlock', () => {
+    it('updates title + ISO timestamps by id', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const startsAt = new Date(2026, 4, 13, 12, 0);
+      const endsAt = new Date(2026, 4, 13, 13, 0);
+      const { error } = await updateBusyBlock({
+        id: 'bb1',
+        startsAt,
+        endsAt,
+        title: 'Renamed lunch',
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('busy_blocks');
+      expect(builder.update).toHaveBeenCalledWith({
+        title: 'Renamed lunch',
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+      });
+      expect(builder.eq).toHaveBeenCalledWith('id', 'bb1');
+    });
+
+    it('translates DB errors', async () => {
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await updateBusyBlock({
+        id: 'bb1',
+        startsAt: new Date(),
+        endsAt: new Date(),
+        title: null,
+      });
+      expect(error).toMatch(/couldn't update activity/i);
+    });
+  });
+
+  describe('updateUnavailableDay', () => {
+    it('updates the title for a (user_id, date) pair', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { error } = await updateUnavailableDay({
+        userId: 'me-id',
+        date: '2026-05-13',
+        title: 'Renamed PTO',
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('unavailable_days');
+      expect(builder.update).toHaveBeenCalledWith({ title: 'Renamed PTO' });
+      expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'me-id');
+      expect(builder.eq).toHaveBeenNthCalledWith(2, 'date', '2026-05-13');
     });
   });
 

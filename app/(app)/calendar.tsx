@@ -41,7 +41,7 @@ function todayInfo() {
 }
 
 export default function CalendarScreen() {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const initial = useMemo(todayInfo, []);
 
   const [month, setMonth] = useState<MonthState>(initial.monthState);
@@ -51,6 +51,7 @@ export default function CalendarScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [monthVisible, setMonthVisible] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<CalendarItem | null>(null);
 
   const fetchMonth = useCallback(async () => {
     const { fromDate, toDate } = monthRange(month.year, month.monthIndex);
@@ -80,13 +81,20 @@ export default function CalendarScreen() {
   }
 
   function handleItemPress(item: CalendarItem) {
-    // Only the owner can delete (RLS will reject anyway, but the UI also
-    // gates so the action sheet doesn't appear on a friend's item).
+    // Only the owner can edit / delete. RLS would block server-side too, but
+    // the UI gate avoids surfacing an action sheet on a friend's item.
     if (item.user.id !== session?.user.id) return;
 
     const label = item.kind === 'busy_block' ? (item.title ?? 'Busy time') : (item.title ?? 'Unavailable day');
-    Alert.alert('Delete this?', `Remove "${label}" from your calendar?`, [
+    Alert.alert(label, undefined, [
       { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Edit',
+        onPress: () => {
+          setEditing(item);
+          setAddOpen(true);
+        },
+      },
       {
         text: 'Delete',
         style: 'destructive',
@@ -103,6 +111,11 @@ export default function CalendarScreen() {
         },
       },
     ]);
+  }
+
+  function closeAddSheet() {
+    setAddOpen(false);
+    setEditing(null);
   }
 
   const dotMarkings = useMemo(() => computeMarkings(items), [items]);
@@ -179,8 +192,15 @@ export default function CalendarScreen() {
         accessibilityRole="button"
         accessibilityLabel="Add to calendar"
         testID="add-fab"
-        onPress={() => setAddOpen(true)}
-        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        onPress={() => {
+          setEditing(null);
+          setAddOpen(true);
+        }}
+        style={({ pressed }) => [
+          styles.fab,
+          { backgroundColor: profile?.color ?? SELECTED_BG },
+          pressed && styles.fabPressed,
+        ]}
       >
         <Text style={styles.fabIcon}>+</Text>
       </Pressable>
@@ -188,7 +208,8 @@ export default function CalendarScreen() {
       <AddItemSheet
         visible={addOpen}
         selectedDate={selectedDate}
-        onClose={() => setAddOpen(false)}
+        editing={editing}
+        onClose={closeAddSheet}
         onSaved={fetchMonth}
       />
     </View>
@@ -220,7 +241,6 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: SELECTED_BG,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',

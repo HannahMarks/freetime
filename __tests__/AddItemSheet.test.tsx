@@ -1,11 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { AddItemSheet } from '../components/AddItemSheet';
-import { createBusyBlock, createUnavailableDay } from '../lib/availability-actions';
+import {
+  createBusyBlock,
+  createUnavailableDay,
+  updateBusyBlock,
+  updateUnavailableDay,
+} from '../lib/availability-actions';
+import { CalendarItem } from '../lib/calendar-helpers';
 import { toast } from '../lib/toast';
 
 jest.mock('../lib/availability-actions', () => ({
   createBusyBlock: jest.fn(),
   createUnavailableDay: jest.fn(),
+  updateBusyBlock: jest.fn(),
+  updateUnavailableDay: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -26,6 +34,10 @@ jest.mock('../components/TimePicker', () => ({
 
 const mockedCreateBusy = createBusyBlock as jest.MockedFunction<typeof createBusyBlock>;
 const mockedCreateUnavail = createUnavailableDay as jest.MockedFunction<typeof createUnavailableDay>;
+const mockedUpdateBusy = updateBusyBlock as jest.MockedFunction<typeof updateBusyBlock>;
+const mockedUpdateUnavail = updateUnavailableDay as jest.MockedFunction<typeof updateUnavailableDay>;
+
+const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -147,6 +159,90 @@ describe('AddItemSheet', () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
     expect(onSaved).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  describe('edit mode', () => {
+    const editingBusy: CalendarItem = {
+      kind: 'busy_block',
+      id: 'bb1',
+      user: me,
+      startsAt: new Date(2026, 4, 13, 14, 0),
+      endsAt: new Date(2026, 4, 13, 15, 30),
+      title: 'Yoga',
+    };
+    const editingDay: CalendarItem = {
+      kind: 'unavailable_day',
+      user: me,
+      date: '2026-05-13',
+      title: 'PTO',
+    };
+
+    it("renders 'Edit' as the heading and hides the kind toggle", () => {
+      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      expect(screen.getByText('Edit')).toBeOnTheScreen();
+      expect(screen.queryByTestId('kind-busy')).toBeNull();
+      expect(screen.queryByTestId('kind-unavailable')).toBeNull();
+    });
+
+    it('pre-fills the title and time pickers from the busy_block being edited', () => {
+      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      expect(screen.getByDisplayValue('Yoga')).toBeOnTheScreen();
+      const pickers = pickersByTestID();
+      expect(pickers['time-picker-start']?.value?.getHours()).toBe(14);
+      expect(pickers['time-picker-end']?.value?.getMinutes()).toBe(30);
+    });
+
+    it('calls updateBusyBlock with the new values when saving an edited busy_block', async () => {
+      mockedUpdateBusy.mockResolvedValue({ error: null });
+      const onSaved = jest.fn();
+      const onClose = jest.fn();
+      render(
+        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+      );
+
+      // User edits the title and pushes start later by an hour.
+      fireEvent.changeText(screen.getByDisplayValue('Yoga'), 'Yoga (rescheduled)');
+      await act(async () => {
+        const pickers = pickersByTestID();
+        pickers['time-picker-start'].onChange?.(new Date(2026, 4, 13, 15, 0));
+        pickers['time-picker-end'].onChange?.(new Date(2026, 4, 13, 16, 0));
+      });
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalledTimes(1));
+      const call = mockedUpdateBusy.mock.calls[0][0];
+      expect(call.id).toBe('bb1');
+      expect(call.title).toBe('Yoga (rescheduled)');
+      expect(call.startsAt.getHours()).toBe(15);
+      expect(call.endsAt.getHours()).toBe(16);
+
+      // create-path was not called.
+      expect(mockedCreateBusy).not.toHaveBeenCalled();
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+
+    it('pre-fills the title for an unavailable_day in edit mode', () => {
+      render(<AddItemSheet {...baseProps} editing={editingDay} />);
+      expect(screen.getByDisplayValue('PTO')).toBeOnTheScreen();
+      // Unavailable mode → no time pickers.
+      expect(pickersByTestID()['time-picker-start']).toBeUndefined();
+    });
+
+    it('calls updateUnavailableDay with userId + date when saving an edited day marker', async () => {
+      mockedUpdateUnavail.mockResolvedValue({ error: null });
+      render(<AddItemSheet {...baseProps} editing={editingDay} />);
+      fireEvent.changeText(screen.getByDisplayValue('PTO'), 'Sick day');
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() =>
+        expect(mockedUpdateUnavail).toHaveBeenCalledWith({
+          userId: 'me-id',
+          date: '2026-05-13',
+          title: 'Sick day',
+        }),
+      );
+    });
   });
 
   it('saves an unavailable_day with the selectedDate and title', async () => {
