@@ -5,7 +5,6 @@
 // prop via a testID-driven press, then assert the wiring downstream of it.
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Text } from 'react-native';
 import CalendarScreen from '../app/(app)/calendar';
 import { updateBusyBlock } from '../lib/availability-actions';
 import { listCalendarItems } from '../lib/calendar-actions';
@@ -61,7 +60,7 @@ jest.mock('../components/DayTimeline', () => ({
   DayTimeline: (props: typeof lastTimelineProps) => {
     lastTimelineProps = props;
     const React = require('react');
-    const { View, Pressable } = require('react-native');
+    const { View, Pressable, Text } = require('react-native');
     return React.createElement(
       View,
       { testID: 'day-timeline-stub' },
