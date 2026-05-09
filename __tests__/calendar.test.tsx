@@ -166,17 +166,17 @@ describe('CalendarScreen', () => {
     expect(label.props.children).not.toMatch(/2026/);
   });
 
-  it('includes the year in the month label when scrolled into a different year', async () => {
+  it('includes the year in the month label when the visible month is in a different year', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
-
-    // Tap a day in next May (2027) via the week strip's underlying onDateChange
-    // path — exposed indirectly here by triggering navigateToDate via the
-    // grid's onDayPress (after toggling the grid open).
     showGrid();
+
+    // Page the grid to May 2027 — `onVisibleMonthsChange` is what updates
+    // the screen's `month` state (the source of truth for the label,
+    // not selectedDate).
     await act(async () => {
-      lastCalendarProps.onDayPress?.({ dateString: '2027-05-13' });
+      lastCalendarProps.onVisibleMonthsChange?.([{ year: 2027, month: 5 }]);
     });
 
     const label = screen.getByTestId('month-label');

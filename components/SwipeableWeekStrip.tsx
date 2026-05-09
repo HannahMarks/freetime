@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -10,9 +11,9 @@ import Animated, {
 import { shiftDate } from '../lib/calendar-helpers';
 import { WeekStrip } from './WeekStrip';
 
-const SLIDE_DURATION_MS = 140;
-const SPRING_BACK_DURATION_MS = 120;
-const SLIDE_EASING = Easing.out(Easing.cubic);
+const SLIDE_DURATION_MS = 220;
+const SPRING_BACK_DURATION_MS = 160;
+const SLIDE_EASING = Easing.out(Easing.exp);
 /** Hard-coded height of a single WeekStrip — chosen to match the
  * intrinsic height of WeekStrip's content (label + 30px bubble +
  * vertical padding). Matters because the panes are absolute-positioned
@@ -44,7 +45,14 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
   const prevWeekDate = shiftDate(selectedDate, -7);
   const nextWeekDate = shiftDate(selectedDate, 7);
 
+  // Guard against the gesture's animation completion callback firing
+  // twice across the key-based re-mount race — without this, a single
+  // swipe could occasionally land at +14 days instead of +7.
+  const committedRef = useRef(false);
+
   function commit(newDate: string) {
+    if (committedRef.current) return;
+    committedRef.current = true;
     onDateChange(newDate);
   }
 

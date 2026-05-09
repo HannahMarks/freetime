@@ -38,6 +38,6 @@ describe('WeekStrip', () => {
     render(
       <WeekStrip selectedDate="2026-05-13" todayIso="2026-05-13" onDateChange={jest.fn()} />,
     );
-    expect(screen.getByLabelText(/W 13 selected/)).toBeOnTheScreen();
+    expect(screen.getByLabelText(/Wed 13 selected/)).toBeOnTheScreen();
   });
 });
