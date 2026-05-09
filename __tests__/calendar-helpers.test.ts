@@ -1,9 +1,12 @@
 import {
   buildAgenda,
   CalendarItem,
+  computeMarkings,
   formatDayLabel,
   formatTimeRange,
   isoDate,
+  itemsOnDate,
+  monthRange,
   nextNDays,
 } from '../lib/calendar-helpers';
 
@@ -74,6 +77,105 @@ describe('formatTimeRange', () => {
     expect(out).toMatch(/^.+–.+$/);
     expect(out).toMatch(/12/);
     expect(out).toMatch(/1:30|13:30/);
+  });
+});
+
+describe('monthRange', () => {
+  it('returns the first of the given month and the first of the next month', () => {
+    expect(monthRange(2026, 4)).toEqual({
+      fromDate: '2026-05-01',
+      toDate: '2026-06-01',
+    });
+  });
+
+  it('rolls year on December → January', () => {
+    expect(monthRange(2026, 11)).toEqual({
+      fromDate: '2026-12-01',
+      toDate: '2027-01-01',
+    });
+  });
+});
+
+describe('computeMarkings', () => {
+  it('produces one dot per friend with items on a day', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: '1',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 9, 0),
+        endsAt: new Date(2026, 4, 13, 10, 0),
+        title: null,
+      },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: null },
+    ];
+    const out = computeMarkings(items);
+    expect(out['2026-05-13'].dots).toEqual([
+      { key: 'a', color: '#FF6B6B' },
+      { key: 'b', color: '#4ECDC4' },
+    ]);
+  });
+
+  it('dedupes dots when the same user has multiple items on a day', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: '1',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 9, 0),
+        endsAt: new Date(2026, 4, 13, 10, 0),
+        title: null,
+      },
+      {
+        kind: 'busy_block',
+        id: '2',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 14, 0),
+        endsAt: new Date(2026, 4, 13, 15, 0),
+        title: null,
+      },
+    ];
+    const out = computeMarkings(items);
+    expect(out['2026-05-13'].dots).toHaveLength(1);
+    expect(out['2026-05-13'].dots[0].key).toBe('a');
+  });
+
+  it('returns an empty object when given no items', () => {
+    expect(computeMarkings([])).toEqual({});
+  });
+});
+
+describe('itemsOnDate', () => {
+  it('returns busy_blocks whose start falls on the date', () => {
+    const items: CalendarItem[] = [
+      {
+        kind: 'busy_block',
+        id: 'on',
+        user: alice,
+        startsAt: new Date(2026, 4, 13, 12, 0),
+        endsAt: new Date(2026, 4, 13, 13, 0),
+        title: null,
+      },
+      {
+        kind: 'busy_block',
+        id: 'off',
+        user: alice,
+        startsAt: new Date(2026, 4, 14, 12, 0),
+        endsAt: new Date(2026, 4, 14, 13, 0),
+        title: null,
+      },
+    ];
+    const out = itemsOnDate(items, '2026-05-13');
+    expect(out).toHaveLength(1);
+    expect((out[0] as { id: string }).id).toBe('on');
+  });
+
+  it('returns unavailable_day rows that match the date', () => {
+    const items: CalendarItem[] = [
+      { kind: 'unavailable_day', user: alice, date: '2026-05-13', title: 'PTO' },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-14', title: null },
+    ];
+    expect(itemsOnDate(items, '2026-05-13')).toHaveLength(1);
   });
 });
 

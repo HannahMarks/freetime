@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -7,64 +7,89 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Calendar, DateData } from 'react-native-calendars';
 import { listCalendarItems } from '../../lib/calendar-actions';
 import {
-  buildAgenda,
   CalendarItem,
-  DayAgenda,
+  computeMarkings,
+  formatDayLabel,
   formatTimeRange,
   isoDate,
-  nextNDays,
+  itemsOnDate,
+  monthRange,
 } from '../../lib/calendar-helpers';
 import { toast } from '../../lib/toast';
 
-const WINDOW_DAYS = 7;
+const SELECTED_BG = '#111';
+
+type MonthState = { year: number; monthIndex: number };
+
+function todayInfo() {
+  const today = new Date();
+  return {
+    today,
+    todayIso: isoDate(today),
+    monthState: { year: today.getFullYear(), monthIndex: today.getMonth() } as MonthState,
+  };
+}
 
 export default function CalendarScreen() {
-  const [agenda, setAgenda] = useState<DayAgenda[] | null>(null);
+  const initial = useMemo(todayInfo, []);
+
+  const [month, setMonth] = useState<MonthState>(initial.monthState);
+  const [selectedDate, setSelectedDate] = useState<string>(initial.todayIso);
+  const [items, setItems] = useState<CalendarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchAgenda = useCallback(async () => {
-    const today = new Date();
-    const dateKeys = nextNDays(WINDOW_DAYS, today);
-    const lastKey = dateKeys[dateKeys.length - 1];
-    const [y, m, d] = lastKey.split('-').map(Number);
-    const dayAfterLast = new Date(y, m - 1, d + 1);
-
-    const { data, error } = await listCalendarItems({
-      fromDate: dateKeys[0],
-      toDate: isoDate(dayAfterLast),
-    });
-
+  const fetchMonth = useCallback(async () => {
+    const { fromDate, toDate } = monthRange(month.year, month.monthIndex);
+    const { data, error } = await listCalendarItems({ fromDate, toDate });
     if (error) {
       toast.error(error);
       return;
     }
-    if (data) setAgenda(buildAgenda(data, dateKeys, today));
-  }, []);
+    if (data) setItems(data);
+  }, [month]);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await fetchAgenda();
-      setLoading(false);
-    })();
-  }, [fetchAgenda]);
+    let cancelled = false;
+    setLoading(true);
+    fetchMonth().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchMonth]);
 
   async function handleRefresh() {
     setRefreshing(true);
-    await fetchAgenda();
+    await fetchMonth();
     setRefreshing(false);
   }
 
-  if (loading) {
-    return (
-      <View testID="calendar-loading" style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  const dotMarkings = useMemo(() => computeMarkings(items), [items]);
+
+  // Merge friend-color dots with the selection highlight for the active day.
+  const markedDates = useMemo(() => {
+    const merged: Record<string, { dots?: { key: string; color: string }[]; selected?: boolean; selectedColor?: string }> = {
+      ...dotMarkings,
+    };
+    merged[selectedDate] = {
+      ...(merged[selectedDate] ?? { dots: [] }),
+      selected: true,
+      selectedColor: SELECTED_BG,
+    };
+    return merged;
+  }, [dotMarkings, selectedDate]);
+
+  const selectedItems = useMemo(
+    () => itemsOnDate(items, selectedDate),
+    [items, selectedDate],
+  );
+
+  const monthInitial = `${month.year}-${String(month.monthIndex + 1).padStart(2, '0')}-01`;
 
   return (
     <ScrollView
@@ -72,17 +97,35 @@ export default function CalendarScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
     >
-      <Text style={styles.heading}>Next {WINDOW_DAYS} days</Text>
-      {agenda?.map((day) => (
-        <View key={day.date} style={styles.dayBlock}>
-          <Text style={styles.dayLabel}>{day.label}</Text>
-          {day.items.length === 0 ? (
-            <Text style={styles.empty}>Free</Text>
-          ) : (
-            day.items.map((item) => <ItemRow key={itemKey(item)} item={item} />)
-          )}
-        </View>
-      ))}
+      <Calendar
+        testID="calendar-grid"
+        current={monthInitial}
+        markedDates={markedDates}
+        markingType="multi-dot"
+        onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
+        onMonthChange={(d: DateData) =>
+          // react-native-calendars passes 1-indexed month; convert to 0-indexed.
+          setMonth({ year: d.year, monthIndex: d.month - 1 })
+        }
+        theme={{
+          arrowColor: SELECTED_BG,
+          todayTextColor: SELECTED_BG,
+          selectedDayBackgroundColor: SELECTED_BG,
+        }}
+      />
+
+      <View style={styles.dayPanel}>
+        <Text style={styles.dayLabel}>{formatDayLabel(selectedDate, initial.today)}</Text>
+        {loading ? (
+          <View testID="calendar-loading" style={styles.loadingRow}>
+            <ActivityIndicator />
+          </View>
+        ) : selectedItems.length === 0 ? (
+          <Text style={styles.empty}>Free</Text>
+        ) : (
+          selectedItems.map((item) => <ItemRow key={itemKey(item)} item={item} />)
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -113,12 +156,11 @@ function ItemRow({ item }: { item: CalendarItem }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  content: { padding: 16, gap: 16 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  heading: { fontSize: 13, fontWeight: '600', color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 },
-  dayBlock: { gap: 6 },
-  dayLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
-  empty: { fontSize: 14, color: '#bbb', fontStyle: 'italic', paddingVertical: 4 },
+  content: { paddingBottom: 24 },
+  dayPanel: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },
+  dayLabel: { fontSize: 18, fontWeight: '600', color: '#111' },
+  empty: { fontSize: 14, color: '#bbb', fontStyle: 'italic', paddingVertical: 8 },
+  loadingRow: { paddingVertical: 24, alignItems: 'center' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
