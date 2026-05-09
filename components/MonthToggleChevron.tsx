@@ -10,10 +10,11 @@ import Animated, {
 const AnimatedText = Animated.createAnimatedComponent(Text);
 
 const ROTATION_DURATION_MS = 240;
-/** Visual center of the chevron glyph and of the adjacent month label
- * are aligned by rendering both inside line boxes of this exact height
- * with `justifyContent: 'center'`. */
-const ALIGN_LINE_HEIGHT = 22;
+/** Both glyph and adjacent label share this fontSize + lineHeight so
+ * their line boxes are the same height and align cleanly via the
+ * parent row's alignItems: 'center'. */
+const HEADER_FONT_SIZE = 22;
+const HEADER_LINE_HEIGHT = 28;
 
 type Props = {
   /** True when the month grid is expanded (chevron points up). */
@@ -49,35 +50,35 @@ export function MonthToggleChevron({ expanded, onPress }: Props) {
       hitSlop={12}
       style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
     >
-      {/* Fixed-height box centers the glyph vertically. With the parent
-          row using alignItems: 'center', this puts the glyph's visual
-          center exactly at the row's middle line — same as the
-          adjacent month label. */}
-      <View style={styles.glyphBox}>
-        <AnimatedText style={[styles.chevron, animatedStyle]}>⌄</AnimatedText>
-      </View>
+      {/* Same fontSize + lineHeight as the adjacent month label so the
+          two line boxes have identical heights and the parent row's
+          alignItems: 'center' centers both visually. scaleX widens
+          the glyph horizontally so the chevron isn't a thin sliver. */}
+      <AnimatedText style={[styles.chevron, animatedStyle]}>⌄</AnimatedText>
     </Pressable>
   );
 }
 
+/** Font sizing exported so the calendar screen can match its month
+ * label exactly — keeps the chevron and label on the same line box. */
+export const monthHeaderFontSize = HEADER_FONT_SIZE;
+export const monthHeaderLineHeight = HEADER_LINE_HEIGHT;
+
 const styles = StyleSheet.create({
   button: {
-    paddingHorizontal: 2,
+    paddingHorizontal: 4,
     paddingVertical: 0,
   },
   buttonPressed: { opacity: 0.6 },
-  glyphBox: {
-    height: ALIGN_LINE_HEIGHT,
-    width: ALIGN_LINE_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   chevron: {
-    fontSize: 16,
-    lineHeight: 16,
+    fontSize: HEADER_FONT_SIZE,
+    lineHeight: HEADER_LINE_HEIGHT,
     color: '#444',
     fontWeight: '700',
     textAlign: 'center',
     includeFontPadding: false,
+    // Wider chevron — gives the open arrow more presence next to
+    // the larger month label.
+    transform: [{ scaleX: 1.4 }],
   },
 });

@@ -15,7 +15,11 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { AddItemSheet } from '../../components/AddItemSheet';
-import { MonthToggleChevron } from '../../components/MonthToggleChevron';
+import {
+  MonthToggleChevron,
+  monthHeaderFontSize,
+  monthHeaderLineHeight,
+} from '../../components/MonthToggleChevron';
 import { SwipeableDayCarousel } from '../../components/SwipeableDayCarousel';
 import { SwipeableWeekStrip } from '../../components/SwipeableWeekStrip';
 import { useAuth } from '../../lib/auth';
@@ -32,7 +36,11 @@ import { toast } from '../../lib/toast';
 
 const SELECTED_BG = '#111';
 const WEEK_STRIP_HEIGHT = 70;
-const MONTH_GRID_HEIGHT = 360;
+// Fits 6 rows of day cells (~46px each) + the weekday header row
+// (~30px). The CalendarList's per-month header is hidden, so we don't
+// need padding for that. Tightened from 360 → 300 to remove the empty
+// space that used to appear below the grid.
+const MONTH_GRID_HEIGHT = 300;
 
 type MonthState = { year: number; monthIndex: number };
 
@@ -319,7 +327,16 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     gap: 8,
   },
-  monthLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
+  monthLabel: {
+    // Match the chevron's font sizing exactly so both glyphs share a
+    // line box of the same height and align cleanly via the row's
+    // alignItems: 'center'.
+    fontSize: monthHeaderFontSize,
+    lineHeight: monthHeaderLineHeight,
+    fontWeight: '700',
+    color: '#111',
+    includeFontPadding: false,
+  },
   monthWrapper: {
     overflow: 'hidden',
   },
