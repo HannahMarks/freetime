@@ -40,6 +40,50 @@ export function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * `[fromDate, toDate)` covering a calendar month — fromDate is the 1st,
+ * toDate is the 1st of the *next* month (exclusive). Months are 0-indexed
+ * to match `Date#getMonth()`.
+ */
+export function monthRange(year: number, monthIndex: number): {
+  fromDate: string;
+  toDate: string;
+} {
+  return {
+    fromDate: isoDate(new Date(year, monthIndex, 1)),
+    toDate: isoDate(new Date(year, monthIndex + 1, 1)),
+  };
+}
+
+/** A single marking dot for the calendar grid. */
+export type Dot = { key: string; color: string };
+export type DateMarkings = Record<string, { dots: Dot[] }>;
+
+/**
+ * Build per-date marking dots for the month grid. Each dot is keyed by the
+ * owning user's id so the same friend never produces two dots on the same
+ * day even if they have multiple busy_blocks that day.
+ */
+export function computeMarkings(items: CalendarItem[]): DateMarkings {
+  const result: DateMarkings = {};
+  for (const item of items) {
+    const dateKey = item.kind === 'busy_block' ? isoDate(item.startsAt) : item.date;
+    if (!result[dateKey]) result[dateKey] = { dots: [] };
+    if (!result[dateKey].dots.some((d) => d.key === item.user.id)) {
+      result[dateKey].dots.push({ key: item.user.id, color: item.user.color });
+    }
+  }
+  return result;
+}
+
+/** Items belonging to a single calendar day. */
+export function itemsOnDate(items: CalendarItem[], date: string): CalendarItem[] {
+  return items.filter((item) => {
+    const key = item.kind === 'busy_block' ? isoDate(item.startsAt) : item.date;
+    return key === date;
+  });
+}
+
 /** N consecutive YYYY-MM-DD strings starting from `from` (default today). */
 export function nextNDays(n: number, from: Date = new Date()): string[] {
   const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
