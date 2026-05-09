@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 import CalendarScreen from '../app/(app)/calendar';
+import {
+  deleteBusyBlock,
+  deleteUnavailableDay,
+} from '../lib/availability-actions';
 import { listCalendarItems } from '../lib/calendar-actions';
 import { toast } from '../lib/toast';
 
@@ -7,8 +12,17 @@ jest.mock('../lib/calendar-actions', () => ({
   listCalendarItems: jest.fn(),
 }));
 
+jest.mock('../lib/availability-actions', () => ({
+  deleteBusyBlock: jest.fn(),
+  deleteUnavailableDay: jest.fn(),
+}));
+
 jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
+}));
+
+jest.mock('../lib/auth', () => ({
+  useAuth: () => ({ session: { user: { id: 'me-id' } }, loading: false }),
 }));
 
 // Stub react-native-calendars and capture the most recent props so tests can
@@ -32,6 +46,10 @@ jest.mock('react-native-calendars', () => {
 });
 
 const mockedList = listCalendarItems as jest.MockedFunction<typeof listCalendarItems>;
+const mockedDeleteBusy = deleteBusyBlock as jest.MockedFunction<typeof deleteBusyBlock>;
+const mockedDeleteDay = deleteUnavailableDay as jest.MockedFunction<typeof deleteUnavailableDay>;
+
+const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 
 const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
 const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
@@ -250,6 +268,133 @@ describe('CalendarScreen', () => {
       expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
       fireEvent.press(screen.getByTestId('toggle-month-grid'));
       expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
+    });
+  });
+
+  describe('add + delete flows', () => {
+    it('opens the add sheet when the FAB is pressed and dismisses on Cancel', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      expect(screen.queryByTestId('add-item-sheet')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('add-fab'));
+      expect(screen.getByTestId('add-item-sheet')).toBeOnTheScreen();
+
+      fireEvent.press(screen.getByLabelText('Cancel'));
+      await waitFor(() => expect(screen.queryByTestId('add-item-sheet')).toBeNull());
+    });
+
+    it("confirms-then-deletes the user's own busy_block when tapped", async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            kind: 'busy_block',
+            id: 'bb1',
+            user: me,
+            startsAt: new Date(2026, 4, 13, 9, 0),
+            endsAt: new Date(2026, 4, 13, 10, 0),
+            title: 'Standup',
+          },
+        ],
+        error: null,
+      });
+      mockedDeleteBusy.mockResolvedValue({ error: null });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+        destructive?.onPress?.();
+      });
+
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      fireEvent.press(screen.getByTestId('day-block-bb1'));
+
+      await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
+      // listFriendships fires once on mount + again after delete.
+      await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
+
+      alertSpy.mockRestore();
+    });
+
+    it("ignores taps on someone else's items (RLS-protected, but UI also gates)", async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            kind: 'busy_block',
+            id: 'bb1',
+            user: alice,
+            startsAt: new Date(2026, 4, 13, 9, 0),
+            endsAt: new Date(2026, 4, 13, 10, 0),
+            title: null,
+          },
+        ],
+        error: null,
+      });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      fireEvent.press(screen.getByTestId('day-block-bb1'));
+
+      expect(alertSpy).not.toHaveBeenCalled();
+      expect(mockedDeleteBusy).not.toHaveBeenCalled();
+
+      alertSpy.mockRestore();
+    });
+
+    it("confirms-then-deletes the user's own unavailable_day when the banner is tapped", async () => {
+      mockedList.mockResolvedValue({
+        data: [{ kind: 'unavailable_day', user: me, date: '2026-05-13', title: 'PTO' }],
+        error: null,
+      });
+      mockedDeleteDay.mockResolvedValue({ error: null });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+        destructive?.onPress?.();
+      });
+
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      fireEvent.press(screen.getByTestId('day-banner-me-id'));
+
+      await waitFor(() =>
+        expect(mockedDeleteDay).toHaveBeenCalledWith({ userId: 'me-id', date: '2026-05-13' }),
+      );
+
+      alertSpy.mockRestore();
+    });
+
+    it('toasts when the delete action fails', async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            kind: 'busy_block',
+            id: 'bb1',
+            user: me,
+            startsAt: new Date(2026, 4, 13, 9, 0),
+            endsAt: new Date(2026, 4, 13, 10, 0),
+            title: null,
+          },
+        ],
+        error: null,
+      });
+      mockedDeleteBusy.mockResolvedValue({ error: 'Server is grumpy' });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+        destructive?.onPress?.();
+      });
+
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      fireEvent.press(screen.getByTestId('day-block-bb1'));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
+      alertSpy.mockRestore();
     });
   });
 

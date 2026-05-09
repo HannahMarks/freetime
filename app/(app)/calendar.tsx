@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -8,7 +9,13 @@ import {
   View,
 } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
+import { AddItemSheet } from '../../components/AddItemSheet';
 import { DayTimeline } from '../../components/DayTimeline';
+import { useAuth } from '../../lib/auth';
+import {
+  deleteBusyBlock,
+  deleteUnavailableDay,
+} from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
 import {
   CalendarItem,
@@ -34,6 +41,7 @@ function todayInfo() {
 }
 
 export default function CalendarScreen() {
+  const { session } = useAuth();
   const initial = useMemo(todayInfo, []);
 
   const [month, setMonth] = useState<MonthState>(initial.monthState);
@@ -42,6 +50,7 @@ export default function CalendarScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [monthVisible, setMonthVisible] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
 
   const fetchMonth = useCallback(async () => {
     const { fromDate, toDate } = monthRange(month.year, month.monthIndex);
@@ -68,6 +77,32 @@ export default function CalendarScreen() {
     setRefreshing(true);
     await fetchMonth();
     setRefreshing(false);
+  }
+
+  function handleItemPress(item: CalendarItem) {
+    // Only the owner can delete (RLS will reject anyway, but the UI also
+    // gates so the action sheet doesn't appear on a friend's item).
+    if (item.user.id !== session?.user.id) return;
+
+    const label = item.kind === 'busy_block' ? (item.title ?? 'Busy time') : (item.title ?? 'Unavailable day');
+    Alert.alert('Delete this?', `Remove "${label}" from your calendar?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const result =
+            item.kind === 'busy_block'
+              ? await deleteBusyBlock(item.id)
+              : await deleteUnavailableDay({ userId: item.user.id, date: item.date });
+          if (result.error) {
+            toast.error(result.error);
+            return;
+          }
+          await fetchMonth();
+        },
+      },
+    ]);
   }
 
   const dotMarkings = useMemo(() => computeMarkings(items), [items]);
@@ -102,7 +137,6 @@ export default function CalendarScreen() {
           markingType="multi-dot"
           onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
           onMonthChange={(d: DateData) =>
-            // react-native-calendars passes 1-indexed month; convert to 0-indexed.
             setMonth({ year: d.year, monthIndex: d.month - 1 })
           }
           theme={{
@@ -134,11 +168,29 @@ export default function CalendarScreen() {
       ) : (
         <DayTimeline
           items={selectedItems}
+          onItemPress={handleItemPress}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
         />
       )}
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Add to calendar"
+        testID="add-fab"
+        onPress={() => setAddOpen(true)}
+        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+      >
+        <Text style={styles.fabIcon}>+</Text>
+      </Pressable>
+
+      <AddItemSheet
+        visible={addOpen}
+        selectedDate={selectedDate}
+        onClose={() => setAddOpen(false)}
+        onSaved={fetchMonth}
+      />
     </View>
   );
 }
@@ -161,4 +213,22 @@ const styles = StyleSheet.create({
   toggleButtonPressed: { opacity: 0.6 },
   toggleChevron: { fontSize: 14, color: '#666' },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: SELECTED_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  fabPressed: { opacity: 0.85 },
+  fabIcon: { color: '#fff', fontSize: 30, lineHeight: 32, fontWeight: '300' },
 });
