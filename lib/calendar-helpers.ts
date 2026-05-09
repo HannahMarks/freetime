@@ -35,6 +35,12 @@ export type DayAgenda = {
   items: CalendarItem[];
 };
 
+/** YYYY-MM-DD that's `days` away from `dateStr` (positive = forward). */
+export function shiftDate(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return isoDate(new Date(y, m - 1, d + days));
+}
+
 /** Local-timezone YYYY-MM-DD for a Date. */
 export function isoDate(d: Date): string {
   const y = d.getFullYear();

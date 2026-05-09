@@ -12,6 +12,7 @@ import {
   nextNDays,
   parseTime,
   shiftBlockByMinutes,
+  shiftDate,
   snapMinutes,
 } from '../lib/calendar-helpers';
 
@@ -405,6 +406,30 @@ describe('buildAgenda', () => {
     const agenda = buildAgenda(items, dateKeys, today);
     expect((agenda[0].items[0] as { id: string }).id).toBe('early');
     expect((agenda[0].items[1] as { id: string }).id).toBe('late');
+  });
+});
+
+describe('shiftDate', () => {
+  it('returns the next day for a positive offset', () => {
+    expect(shiftDate('2026-05-13', 1)).toBe('2026-05-14');
+  });
+
+  it('returns the previous day for a negative offset', () => {
+    expect(shiftDate('2026-05-13', -1)).toBe('2026-05-12');
+  });
+
+  it('rolls over month boundaries', () => {
+    expect(shiftDate('2026-05-31', 1)).toBe('2026-06-01');
+    expect(shiftDate('2026-05-01', -1)).toBe('2026-04-30');
+  });
+
+  it('rolls over year boundaries', () => {
+    expect(shiftDate('2026-12-31', 1)).toBe('2027-01-01');
+    expect(shiftDate('2027-01-01', -1)).toBe('2026-12-31');
+  });
+
+  it('returns the same date for zero offset', () => {
+    expect(shiftDate('2026-05-13', 0)).toBe('2026-05-13');
   });
 });
 

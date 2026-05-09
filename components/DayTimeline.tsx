@@ -1,6 +1,6 @@
-import { ReactElement, useCallback } from 'react';
+import { ReactElement, useCallback, useState } from 'react';
 import { Pressable, RefreshControlProps, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Directions, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -12,8 +12,10 @@ import {
   CalendarItem,
   formatTimeRange,
   shiftBlockByMinutes,
+  shiftDate,
   UnavailableDayItem,
 } from '../lib/calendar-helpers';
+import { tickSnap } from '../lib/haptics';
 
 const HOUR_HEIGHT = 48;
 const HOUR_LABEL_WIDTH = 56;
@@ -43,6 +45,10 @@ type Props = {
    * snapped to 15-minute increments and shifted equally so duration is
    * preserved. */
   onItemReschedule?: (item: BusyBlockItem, newStart: Date, newEnd: Date) => void;
+  /** Optional swipe-left/right handler. Called with the new YYYY-MM-DD
+   * after a horizontal fling. Parent should update its `selectedDate`
+   * and let the timeline re-render with the new day's items. */
+  onDateChange?: (newDate: string) => void;
 };
 
 /** Pretty hour label like "12 AM", "1 PM". */
@@ -78,6 +84,7 @@ export function DayTimeline({
   refreshControl,
   onItemPress,
   onItemReschedule,
+  onDateChange,
 }: Props) {
   const blocks = items.filter((i): i is BusyBlockItem => i.kind === 'busy_block');
   const days = items.filter((i): i is UnavailableDayItem => i.kind === 'unavailable_day');
@@ -88,7 +95,25 @@ export function DayTimeline({
   const dayStart = new Date(yyyy, mm - 1, dd).getTime();
   const dayEnd = new Date(yyyy, mm - 1, dd + 1).getTime();
 
-  return (
+  // Horizontal-fling gesture for next/prev day. Direction-specific so it
+  // doesn't compete with the inner ScrollView's vertical scroll or the
+  // BusyBlockOverlay's long-press pan. Pre-compute the target dates so
+  // the worklet only handles primitives + a runOnJS call.
+  const nextDay = shiftDate(date, 1);
+  const prevDay = shiftDate(date, -1);
+  const flingNext = Gesture.Fling()
+    .direction(Directions.LEFT)
+    .onStart(() => {
+      if (onDateChange) runOnJS(onDateChange)(nextDay);
+    });
+  const flingPrev = Gesture.Fling()
+    .direction(Directions.RIGHT)
+    .onStart(() => {
+      if (onDateChange) runOnJS(onDateChange)(prevDay);
+    });
+  const horizontalSwipe = Gesture.Race(flingNext, flingPrev);
+
+  const content = (
     <View style={styles.container}>
       {days.length > 0 ? (
         <View testID="day-timeline-banner" style={styles.banner}>
@@ -162,6 +187,13 @@ export function DayTimeline({
       </ScrollView>
     </View>
   );
+
+  // Only wrap in the horizontal-fling gesture when the parent wants
+  // day-change behavior, to keep the gesture surface minimal.
+  if (onDateChange) {
+    return <GestureDetector gesture={horizontalSwipe}>{content}</GestureDetector>;
+  }
+  return content;
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -184,6 +216,11 @@ type OverlayProps = {
 function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: OverlayProps) {
   const offsetY = useSharedValue(0);
   const isDragging = useSharedValue(0);
+  const lastSnap = useSharedValue(0);
+
+  // Live time-range that follows the snap as the user drags. `null` when
+  // not actively dragging — falls back to the block's stored start/end.
+  const [dragMinutes, setDragMinutes] = useState<number | null>(null);
 
   // Commit runs on the JS thread (invoked via runOnJS from the worklet).
   // Takes the already-snapped minute delta — the snap math is inlined in
@@ -201,12 +238,24 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
     .activateAfterLongPress(LONG_PRESS_MS)
     .onStart(() => {
       isDragging.value = withTiming(1, { duration: 120 });
+      lastSnap.value = 0;
+      runOnJS(setDragMinutes)(0);
     })
     .onUpdate((e) => {
       offsetY.value = e.translationY;
+      // Each time the user crosses into a new 15-min slot during drag,
+      // tick the haptic + push the new minute delta to JS so the label
+      // reflects the time it would land at if released right now.
+      const rawDeltaMinutes = e.translationY / PIXELS_PER_MINUTE;
+      const snappedMinutes =
+        Math.round(rawDeltaMinutes / SNAP_MINUTES) * SNAP_MINUTES;
+      if (snappedMinutes !== lastSnap.value) {
+        lastSnap.value = snappedMinutes;
+        runOnJS(tickSnap)();
+        runOnJS(setDragMinutes)(snappedMinutes);
+      }
     })
     .onEnd((e) => {
-      // Snap math inlined so the worklet doesn't call non-worklet JS.
       const rawDeltaMinutes = e.translationY / PIXELS_PER_MINUTE;
       const snappedMinutes =
         Math.round(rawDeltaMinutes / SNAP_MINUTES) * SNAP_MINUTES;
@@ -219,11 +268,22 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
       // screen position the snapped offset is currently showing.
       offsetY.value = withTiming(snappedPx, { duration: 150 });
       isDragging.value = withTiming(0, { duration: 150 });
+      runOnJS(setDragMinutes)(null);
       if (snappedMinutes !== 0) {
         runOnJS(commit)(snappedMinutes);
       }
     })
     .enabled(owned && !!onReschedule);
+
+  // Compute the time range to render: original, or the would-land-at
+  // range while the user is dragging.
+  const displayedRange =
+    dragMinutes != null
+      ? formatTimeRange(
+          new Date(block.startsAt.getTime() + dragMinutes * 60_000),
+          new Date(block.endsAt.getTime() + dragMinutes * 60_000),
+        )
+      : formatTimeRange(block.startsAt, block.endsAt);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: offsetY.value }, { scale: 1 + isDragging.value * 0.02 }],
@@ -255,8 +315,12 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
           {block.user.display_name}
           {block.title ? ` · ${block.title}` : ''}
         </Text>
-        <Text style={styles.blockTime} numberOfLines={1}>
-          {formatTimeRange(block.startsAt, block.endsAt)}
+        <Text
+          testID={`day-block-time-${block.id}`}
+          style={[styles.blockTime, dragMinutes != null && styles.blockTimeDragging]}
+          numberOfLines={1}
+        >
+          {displayedRange}
         </Text>
       </AnimatedPressable>
     </GestureDetector>
@@ -308,4 +372,5 @@ const styles = StyleSheet.create({
   },
   blockTitle: { fontSize: 13, fontWeight: '600', color: '#111' },
   blockTime: { fontSize: 11, color: '#444', marginTop: 2 },
+  blockTimeDragging: { fontWeight: '700', color: '#111' },
 });

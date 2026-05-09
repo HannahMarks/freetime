@@ -144,6 +144,7 @@ export default function CalendarScreen() {
             current={monthInitial}
             markedDates={markedDates}
             markingType="multi-dot"
+            enableSwipeMonths
             onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
             onMonthChange={(d: DateData) =>
               setMonth({ year: d.year, monthIndex: d.month - 1 })
@@ -182,6 +183,7 @@ export default function CalendarScreen() {
           currentUserId={session?.user.id}
           onItemPress={handleItemPress}
           onItemReschedule={handleItemReschedule}
+          onDateChange={(newDate) => setSelectedDate(newDate)}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
