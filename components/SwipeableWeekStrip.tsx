@@ -49,6 +49,11 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
   // twice across the key-based re-mount race — without this, a single
   // swipe could occasionally land at +14 days instead of +7.
   const committedRef = useRef(false);
+  // True from the moment the Pan activates until well after the slide
+  // commits. While true, cell-level taps inside any WeekStrip pane are
+  // swallowed — the user just lifted their finger after a swipe; we
+  // don't want that lift to register as a fresh date pick.
+  const isPanningRef = useRef(false);
 
   function commit(newDate: string) {
     if (committedRef.current) return;
@@ -56,9 +61,25 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
     onDateChange(newDate);
   }
 
+  function setPanning(v: boolean) {
+    isPanningRef.current = v;
+  }
+
+  // Wraps the inner WeekStrip's onDateChange so cell taps fired during
+  // (or just after) a swipe are ignored.
+  function guardedDateChange(newDate: string) {
+    if (isPanningRef.current) return;
+    onDateChange(newDate);
+  }
+
   const pan = Gesture.Pan()
-    .activeOffsetX([-10, 10])
+    // 30px is a comfortable threshold — small enough to feel responsive,
+    // big enough to never trigger from touch jitter on a tap.
+    .activeOffsetX([-30, 30])
     .failOffsetY([-15, 15])
+    .onStart(() => {
+      runOnJS(setPanning)(true);
+    })
     .onUpdate((e) => {
       translateX.value = e.translationX;
     })
@@ -86,7 +107,20 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
           easing: SLIDE_EASING,
         });
       }
+    })
+    // Keep `isPanning` true through the post-release window so any
+    // delayed Pressable.onPress firing from finger-lift is still
+    // suppressed. onFinalize fires after onEnd + animation cleanup.
+    .onFinalize(() => {
+      // Small extra delay before re-enabling cell taps, since the
+      // Pressable's onPress fires asynchronously after gesture-handler
+      // releases the touch.
+      runOnJS(scheduleResetPanning)();
     });
+
+  function scheduleResetPanning() {
+    setTimeout(() => setPanning(false), 250);
+  }
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
@@ -101,7 +135,7 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
               selectedDate={prevWeekDate}
               todayIso={todayIso}
               todayColor={todayColor}
-              onDateChange={onDateChange}
+              onDateChange={guardedDateChange}
             />
           </View>
           <View style={[styles.pane, { left: 0, width: screenWidth }]}>
@@ -109,7 +143,7 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
               selectedDate={selectedDate}
               todayIso={todayIso}
               todayColor={todayColor}
-              onDateChange={onDateChange}
+              onDateChange={guardedDateChange}
             />
           </View>
           <View style={[styles.pane, { left: screenWidth, width: screenWidth }]}>
@@ -117,7 +151,7 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
               selectedDate={nextWeekDate}
               todayIso={todayIso}
               todayColor={todayColor}
-              onDateChange={onDateChange}
+              onDateChange={guardedDateChange}
             />
           </View>
         </Animated.View>
