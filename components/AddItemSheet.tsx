@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -10,8 +10,8 @@ import {
   View,
 } from 'react-native';
 import { createBusyBlock, createUnavailableDay } from '../lib/availability-actions';
-import { combineDateAndTime, parseTime } from '../lib/calendar-helpers';
 import { toast } from '../lib/toast';
+import { TimePicker } from './TimePicker';
 
 type Kind = 'busy' | 'unavailable';
 
@@ -22,53 +22,55 @@ type Props = {
   onSaved: () => void;
 };
 
+/** Build a Date for the selected day at the given local hour:minute. */
+function buildDate(dateStr: string, hour: number, minute: number): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, hour, minute, 0, 0);
+}
+
 /**
  * Modal sheet for adding either a busy_block (with start/end times +
- * optional title) or an unavailable_day (just an optional title) on the
- * currently-selected calendar date.
+ * optional title) or an unavailable_day (just an optional title) on
+ * the currently-selected calendar date.
  *
- * Time inputs are plain TextInputs that accept "9:00 AM", "9 AM",
- * "14:30", etc. — see `parseTime`. Less polished than a native picker
- * but pure-JS, dep-free, and works on every platform without
- * conditional rendering.
+ * Time pickers are native scroll-wheel pickers via TimePicker, so users
+ * pick hour and minute by scrolling rather than typing.
  */
 export function AddItemSheet({ visible, selectedDate, onClose, onSaved }: Props) {
   const [kind, setKind] = useState<Kind>('busy');
   const [title, setTitle] = useState('');
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Default times: 9:00–10:00 on the selected day. Recomputed when the
+  // selected day changes so the picker initial values track.
+  const initialStart = useMemo(() => buildDate(selectedDate, 9, 0), [selectedDate]);
+  const initialEnd = useMemo(() => buildDate(selectedDate, 10, 0), [selectedDate]);
+
+  const [start, setStart] = useState<Date>(initialStart);
+  const [end, setEnd] = useState<Date>(initialEnd);
 
   // Reset whenever the sheet (re-)opens.
   useEffect(() => {
     if (visible) {
       setKind('busy');
       setTitle('');
-      setStartTime('');
-      setEndTime('');
+      setStart(initialStart);
+      setEnd(initialEnd);
     }
-  }, [visible]);
+  }, [visible, initialStart, initialEnd]);
 
   async function handleSave() {
     if (submitting) return;
     setSubmitting(true);
     try {
       if (kind === 'busy') {
-        const start = parseTime(startTime);
-        const end = parseTime(endTime);
-        if (!start || !end) {
-          toast.error('Times must look like 9:00 AM or 14:30.');
-          return;
-        }
-        const startsAt = combineDateAndTime(selectedDate, start);
-        const endsAt = combineDateAndTime(selectedDate, end);
-        if (endsAt <= startsAt) {
+        if (end <= start) {
           toast.error('End time must be after start time.');
           return;
         }
         const { error } = await createBusyBlock({
-          startsAt,
-          endsAt,
+          startsAt: start,
+          endsAt: end,
           title: title.trim() || null,
         });
         if (error) {
@@ -95,7 +97,11 @@ export function AddItemSheet({ visible, selectedDate, onClose, onSaved }: Props)
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Dismiss" />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel="Dismiss"
+        />
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.sheetWrap}
@@ -140,27 +146,13 @@ export function AddItemSheet({ visible, selectedDate, onClose, onSaved }: Props)
 
             {kind === 'busy' ? (
               <>
-                <View style={styles.field}>
+                <View style={styles.timeRow}>
                   <Text style={styles.label}>Starts</Text>
-                  <TextInput
-                    placeholder="9:00 AM"
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    style={styles.input}
-                    value={startTime}
-                    onChangeText={setStartTime}
-                  />
+                  <TimePicker testID="time-picker-start" value={start} onChange={setStart} />
                 </View>
-                <View style={styles.field}>
+                <View style={styles.timeRow}>
                   <Text style={styles.label}>Ends</Text>
-                  <TextInput
-                    placeholder="10:00 AM"
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    style={styles.input}
-                    value={endTime}
-                    onChangeText={setEndTime}
-                  />
+                  <TimePicker testID="time-picker-end" value={end} onChange={setEnd} />
                 </View>
               </>
             ) : null}
@@ -232,6 +224,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   actions: { flexDirection: 'row', gap: 10, marginTop: 8 },
   cancel: {
