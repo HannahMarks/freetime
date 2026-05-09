@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import CalendarScreen from '../app/(app)/calendar';
 import { listCalendarItems } from '../lib/calendar-actions';
 import { toast } from '../lib/toast';
@@ -195,6 +195,61 @@ describe('CalendarScreen', () => {
     expect(mockedList).toHaveBeenLastCalledWith({
       fromDate: '2026-06-01',
       toDate: '2026-07-01',
+    });
+  });
+
+  describe('month-grid collapse toggle', () => {
+    it('renders the month grid by default', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+      expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
+    });
+
+    it("hides the month grid when the toggle is tapped, and updates the accessibility label", async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      fireEvent.press(screen.getByTestId('toggle-month-grid'));
+
+      expect(screen.queryByTestId('calendar-grid')).toBeNull();
+      expect(screen.getByLabelText('Show month grid')).toBeOnTheScreen();
+    });
+
+    it("shows the month grid again on a second tap, and reverts the accessibility label", async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      const toggle = screen.getByTestId('toggle-month-grid');
+      fireEvent.press(toggle);
+      fireEvent.press(toggle);
+
+      expect(screen.getByTestId('calendar-grid')).toBeOnTheScreen();
+      expect(screen.getByLabelText('Hide month grid')).toBeOnTheScreen();
+    });
+
+    it("preserves the selected day's items in the timeline while toggling visibility", async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            kind: 'busy_block',
+            id: 'bb1',
+            user: alice,
+            startsAt: new Date(2026, 4, 13, 12, 0),
+            endsAt: new Date(2026, 4, 13, 13, 0),
+            title: 'Lunch',
+          },
+        ],
+        error: null,
+      });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
+      fireEvent.press(screen.getByTestId('toggle-month-grid'));
+      expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
     });
   });
 

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
 import { DayTimeline } from '../../components/DayTimeline';
 import { listCalendarItems } from '../../lib/calendar-actions';
@@ -34,6 +41,7 @@ export default function CalendarScreen() {
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [monthVisible, setMonthVisible] = useState(true);
 
   const fetchMonth = useCallback(async () => {
     const { fromDate, toDate } = monthRange(month.year, month.monthIndex);
@@ -86,25 +94,37 @@ export default function CalendarScreen() {
 
   return (
     <View style={styles.container}>
-      <Calendar
-        testID="calendar-grid"
-        current={monthInitial}
-        markedDates={markedDates}
-        markingType="multi-dot"
-        onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
-        onMonthChange={(d: DateData) =>
-          // react-native-calendars passes 1-indexed month; convert to 0-indexed.
-          setMonth({ year: d.year, monthIndex: d.month - 1 })
-        }
-        theme={{
-          arrowColor: SELECTED_BG,
-          todayTextColor: SELECTED_BG,
-          selectedDayBackgroundColor: SELECTED_BG,
-        }}
-      />
+      {monthVisible ? (
+        <Calendar
+          testID="calendar-grid"
+          current={monthInitial}
+          markedDates={markedDates}
+          markingType="multi-dot"
+          onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
+          onMonthChange={(d: DateData) =>
+            // react-native-calendars passes 1-indexed month; convert to 0-indexed.
+            setMonth({ year: d.year, monthIndex: d.month - 1 })
+          }
+          theme={{
+            arrowColor: SELECTED_BG,
+            todayTextColor: SELECTED_BG,
+            selectedDayBackgroundColor: SELECTED_BG,
+          }}
+        />
+      ) : null}
 
       <View style={styles.dayHeader}>
         <Text style={styles.dayLabel}>{formatDayLabel(selectedDate, initial.today)}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={monthVisible ? 'Hide month grid' : 'Show month grid'}
+          testID="toggle-month-grid"
+          onPress={() => setMonthVisible((v) => !v)}
+          hitSlop={12}
+          style={({ pressed }) => [styles.toggleButton, pressed && styles.toggleButtonPressed]}
+        >
+          <Text style={styles.toggleChevron}>{monthVisible ? '▲' : '▼'}</Text>
+        </Pressable>
       </View>
 
       {loading ? (
@@ -126,6 +146,9 @@ export default function CalendarScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -134,5 +157,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   dayLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
+  toggleButton: { padding: 4 },
+  toggleButtonPressed: { opacity: 0.6 },
+  toggleChevron: { fontSize: 14, color: '#666' },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
