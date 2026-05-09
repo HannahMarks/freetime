@@ -9,7 +9,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { createBusyBlock, createUnavailableDay } from '../lib/availability-actions';
+import {
+  createBusyBlock,
+  createUnavailableDay,
+  updateBusyBlock,
+  updateUnavailableDay,
+} from '../lib/availability-actions';
+import { CalendarItem } from '../lib/calendar-helpers';
 import { toast } from '../lib/toast';
 import { TimePicker } from './TimePicker';
 
@@ -18,6 +24,12 @@ type Kind = 'busy' | 'unavailable';
 type Props = {
   visible: boolean;
   selectedDate: string; // YYYY-MM-DD
+  /**
+   * If set, the sheet pre-fills with this item and saves via the update
+   * path instead of create. The kind toggle is hidden in edit mode (a
+   * busy_block stays a busy_block; switching kinds is delete + re-add).
+   */
+  editing?: CalendarItem | null;
   onClose: () => void;
   onSaved: () => void;
 };
@@ -29,59 +41,83 @@ function buildDate(dateStr: string, hour: number, minute: number): Date {
 }
 
 /**
- * Modal sheet for adding either a busy_block (with start/end times +
- * optional title) or an unavailable_day (just an optional title) on
- * the currently-selected calendar date.
- *
- * Time pickers are native scroll-wheel pickers via TimePicker, so users
- * pick hour and minute by scrolling rather than typing.
+ * Modal sheet for adding OR editing either a busy_block (with start/end
+ * times + optional title) or an unavailable_day (just an optional title)
+ * on the currently-selected calendar date. Native scroll-wheel time
+ * pickers via `TimePicker`.
  */
-export function AddItemSheet({ visible, selectedDate, onClose, onSaved }: Props) {
-  const [kind, setKind] = useState<Kind>('busy');
+export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved }: Props) {
+  const editingKind: Kind | null = editing
+    ? editing.kind === 'busy_block'
+      ? 'busy'
+      : 'unavailable'
+    : null;
+
+  const [kind, setKind] = useState<Kind>(editingKind ?? 'busy');
   const [title, setTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Default times: 9:00–10:00 on the selected day. Recomputed when the
-  // selected day changes so the picker initial values track.
-  const initialStart = useMemo(() => buildDate(selectedDate, 9, 0), [selectedDate]);
-  const initialEnd = useMemo(() => buildDate(selectedDate, 10, 0), [selectedDate]);
+  const initialStart = useMemo(() => {
+    if (editing?.kind === 'busy_block') return editing.startsAt;
+    return buildDate(selectedDate, 9, 0);
+  }, [editing, selectedDate]);
+  const initialEnd = useMemo(() => {
+    if (editing?.kind === 'busy_block') return editing.endsAt;
+    return buildDate(selectedDate, 10, 0);
+  }, [editing, selectedDate]);
 
   const [start, setStart] = useState<Date>(initialStart);
   const [end, setEnd] = useState<Date>(initialEnd);
 
-  // Reset whenever the sheet (re-)opens.
+  // Reset whenever the sheet (re-)opens or the editing target changes.
   useEffect(() => {
     if (visible) {
-      setKind('busy');
-      setTitle('');
+      setKind(editingKind ?? 'busy');
+      setTitle(editing?.title ?? '');
       setStart(initialStart);
       setEnd(initialEnd);
     }
-  }, [visible, initialStart, initialEnd]);
+  }, [visible, editing, editingKind, initialStart, initialEnd]);
 
   async function handleSave() {
     if (submitting) return;
     setSubmitting(true);
     try {
+      const trimmedTitle = title.trim() || null;
       if (kind === 'busy') {
         if (end <= start) {
           toast.error('End time must be after start time.');
           return;
         }
-        const { error } = await createBusyBlock({
-          startsAt: start,
-          endsAt: end,
-          title: title.trim() || null,
-        });
+        const { error } =
+          editing?.kind === 'busy_block'
+            ? await updateBusyBlock({
+                id: editing.id,
+                startsAt: start,
+                endsAt: end,
+                title: trimmedTitle,
+              })
+            : await createBusyBlock({
+                startsAt: start,
+                endsAt: end,
+                title: trimmedTitle,
+              });
         if (error) {
           toast.error(error);
           return;
         }
       } else {
-        const { error } = await createUnavailableDay({
-          date: selectedDate,
-          title: title.trim() || null,
-        });
+        const { error } =
+          editing?.kind === 'unavailable_day'
+            ? await updateUnavailableDay({
+                userId: editing.user.id,
+                date: editing.date,
+                title: trimmedTitle,
+              })
+            : await createUnavailableDay({
+                date: selectedDate,
+                title: trimmedTitle,
+              });
         if (error) {
           toast.error(error);
           return;
@@ -93,6 +129,8 @@ export function AddItemSheet({ visible, selectedDate, onClose, onSaved }: Props)
       setSubmitting(false);
     }
   }
+
+  const heading = editing ? 'Edit' : 'Add to your day';
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -107,32 +145,34 @@ export function AddItemSheet({ visible, selectedDate, onClose, onSaved }: Props)
           style={styles.sheetWrap}
         >
           <View style={styles.sheet} testID="add-item-sheet">
-            <Text style={styles.heading}>Add to your day</Text>
+            <Text style={styles.heading}>{heading}</Text>
 
-            <View style={styles.toggleRow}>
-              <Pressable
-                onPress={() => setKind('busy')}
-                accessibilityRole="button"
-                accessibilityLabel="Add busy time"
-                testID="kind-busy"
-                style={[styles.toggle, kind === 'busy' && styles.toggleSelected]}
-              >
-                <Text style={kind === 'busy' ? styles.toggleLabelSelected : styles.toggleLabel}>
-                  Busy time
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setKind('unavailable')}
-                accessibilityRole="button"
-                accessibilityLabel="Mark whole day unavailable"
-                testID="kind-unavailable"
-                style={[styles.toggle, kind === 'unavailable' && styles.toggleSelected]}
-              >
-                <Text style={kind === 'unavailable' ? styles.toggleLabelSelected : styles.toggleLabel}>
-                  Unavailable all day
-                </Text>
-              </Pressable>
-            </View>
+            {!editing ? (
+              <View style={styles.toggleRow}>
+                <Pressable
+                  onPress={() => setKind('busy')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add busy time"
+                  testID="kind-busy"
+                  style={[styles.toggle, kind === 'busy' && styles.toggleSelected]}
+                >
+                  <Text style={kind === 'busy' ? styles.toggleLabelSelected : styles.toggleLabel}>
+                    Busy time
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setKind('unavailable')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Mark whole day unavailable"
+                  testID="kind-unavailable"
+                  style={[styles.toggle, kind === 'unavailable' && styles.toggleSelected]}
+                >
+                  <Text style={kind === 'unavailable' ? styles.toggleLabelSelected : styles.toggleLabel}>
+                    Unavailable all day
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             <View style={styles.field}>
               <Text style={styles.label}>Label (optional)</Text>

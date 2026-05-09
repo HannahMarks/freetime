@@ -60,6 +60,40 @@ export async function createUnavailableDay(args: {
   return { error: null };
 }
 
+export async function updateBusyBlock(args: {
+  id: string;
+  startsAt: Date;
+  endsAt: Date;
+  title: string | null;
+}): Promise<ActionResult> {
+  const { error } = await supabase
+    .from('busy_blocks')
+    .update({
+      title: args.title,
+      starts_at: args.startsAt.toISOString(),
+      ends_at: args.endsAt.toISOString(),
+    })
+    .eq('id', args.id);
+
+  if (error) return { error: describeError("Couldn't update activity", error) };
+  return { error: null };
+}
+
+export async function updateUnavailableDay(args: {
+  userId: string;
+  date: string;
+  title: string | null;
+}): Promise<ActionResult> {
+  const { error } = await supabase
+    .from('unavailable_days')
+    .update({ title: args.title })
+    .eq('user_id', args.userId)
+    .eq('date', args.date);
+
+  if (error) return { error: describeError("Couldn't update day marker", error) };
+  return { error: null };
+}
+
 export async function deleteBusyBlock(id: string): Promise<ActionResult> {
   const { error } = await supabase.from('busy_blocks').delete().eq('id', id);
   if (error) return { error: describeError("Couldn't delete activity", error) };

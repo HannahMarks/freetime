@@ -22,7 +22,12 @@ jest.mock('../lib/toast', () => ({
 }));
 
 jest.mock('../lib/auth', () => ({
-  useAuth: () => ({ session: { user: { id: 'me-id' } }, loading: false }),
+  useAuth: () => ({
+    session: { user: { id: 'me-id' } },
+    profile: { id: 'me-id', display_name: 'Me', color: '#9C27B0' },
+    loading: false,
+    refreshProfile: jest.fn(),
+  }),
 }));
 
 // Stub react-native-calendars and capture the most recent props so tests can
@@ -284,6 +289,48 @@ describe('CalendarScreen', () => {
 
       fireEvent.press(screen.getByLabelText('Cancel'));
       await waitFor(() => expect(screen.queryByTestId('add-item-sheet')).toBeNull());
+    });
+
+    it('renders the FAB with the user\'s profile color', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      const fab = screen.getByTestId('add-fab');
+      // Profile color from the useAuth mock above.
+      expect(fab).toHaveStyle({ backgroundColor: '#9C27B0' });
+    });
+
+    it('opens the add sheet in edit mode when "Edit" is chosen on a tap', async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            kind: 'busy_block',
+            id: 'bb1',
+            user: me,
+            startsAt: new Date(2026, 4, 13, 9, 0),
+            endsAt: new Date(2026, 4, 13, 10, 0),
+            title: 'Standup',
+          },
+        ],
+        error: null,
+      });
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const editBtn = (buttons ?? []).find((b) => b.text === 'Edit');
+        editBtn?.onPress?.();
+      });
+
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      fireEvent.press(screen.getByTestId('day-block-bb1'));
+
+      // Sheet opens; AddItemSheet renders the heading "Edit" when editing is set.
+      expect(screen.getByText('Edit')).toBeOnTheScreen();
+      // The pre-filled title is visible.
+      expect(screen.getByDisplayValue('Standup')).toBeOnTheScreen();
+
+      alertSpy.mockRestore();
     });
 
     it("confirms-then-deletes the user's own busy_block when tapped", async () => {

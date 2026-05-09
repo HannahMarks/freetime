@@ -21,21 +21,24 @@ describe('Index (root route)', () => {
     jest.clearAllMocks();
   });
 
+  const baseAuth = { profile: null, refreshProfile: jest.fn() };
+
   it('renders an activity indicator while auth state is loading', () => {
-    mockedUseAuth.mockReturnValue({ session: null, loading: true });
+    mockedUseAuth.mockReturnValue({ ...baseAuth, session: null, loading: true });
     render(<Index />);
     expect(screen.getByTestId('root-loading')).toBeOnTheScreen();
     expect(mockedRedirect).not.toHaveBeenCalled();
   });
 
   it('redirects to /(auth)/sign-in when there is no session', () => {
-    mockedUseAuth.mockReturnValue({ session: null, loading: false });
+    mockedUseAuth.mockReturnValue({ ...baseAuth, session: null, loading: false });
     render(<Index />);
     expect(mockedRedirect).toHaveBeenCalledWith({ href: '/(auth)/sign-in' });
   });
 
   it('redirects to /(app)/calendar when a session exists', () => {
     mockedUseAuth.mockReturnValue({
+      ...baseAuth,
       session: { user: { id: 'me-id' } } as never,
       loading: false,
     });
