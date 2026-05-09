@@ -7,10 +7,11 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Calendar, DateData } from 'react-native-calendars';
+import { CalendarList, DateData } from 'react-native-calendars';
 import { AddItemSheet } from '../../components/AddItemSheet';
+import { MonthToggleChevron } from '../../components/MonthToggleChevron';
 import { SwipeableDayCarousel } from '../../components/SwipeableDayCarousel';
-import { WeekStrip } from '../../components/WeekStrip';
+import { SwipeableWeekStrip } from '../../components/SwipeableWeekStrip';
 import { useAuth } from '../../lib/auth';
 import { updateBusyBlock } from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
@@ -157,16 +158,10 @@ export default function CalendarScreen() {
     <View style={styles.container}>
       {/* Header: chevron toggle on the left, month label next to it. */}
       <View style={styles.headerRow}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={monthVisible ? 'Hide month grid' : 'Show month grid'}
-          testID="toggle-month-grid"
+        <MonthToggleChevron
+          expanded={monthVisible}
           onPress={() => setMonthVisible((v) => !v)}
-          hitSlop={12}
-          style={({ pressed }) => [styles.toggleButton, pressed && styles.toggleButtonPressed]}
-        >
-          <Text style={styles.toggleChevron}>{monthVisible ? '▲' : '▼'}</Text>
-        </Pressable>
+        />
         <Text style={styles.monthLabel} testID="month-label">
           {formatMonthLabel(selectedDate)}
         </Text>
@@ -174,28 +169,38 @@ export default function CalendarScreen() {
 
       {/* Week strip OR full month grid — never both. The full grid
           already includes everything the week strip shows, so they'd
-          stack redundantly. Chevron toggles between them. */}
+          stack redundantly. Chevron toggles between them. CalendarList
+          (vs. plain Calendar) gives us the smooth horizontal-paged
+          slide between months when swiping. */}
       {monthVisible ? (
-        <Calendar
-          testID="calendar-grid"
-          current={monthInitial}
-          markedDates={markedDates}
-          markingType="multi-dot"
-          enableSwipeMonths
-          onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
-          onMonthChange={(d: DateData) =>
-            setMonth({ year: d.year, monthIndex: d.month - 1 })
-          }
-          theme={{
-            arrowColor: SELECTED_BG,
-            todayTextColor: SELECTED_BG,
-            selectedDayBackgroundColor: SELECTED_BG,
-          }}
-        />
+        <View style={styles.monthGridWrap} testID="calendar-grid-wrap">
+          <CalendarList
+            testID="calendar-grid"
+            current={monthInitial}
+            markedDates={markedDates}
+            markingType="multi-dot"
+            horizontal
+            pagingEnabled
+            pastScrollRange={12}
+            futureScrollRange={12}
+            onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
+            onVisibleMonthsChange={(months: DateData[]) => {
+              if (months.length > 0) {
+                setMonth({ year: months[0].year, monthIndex: months[0].month - 1 });
+              }
+            }}
+            theme={{
+              arrowColor: SELECTED_BG,
+              todayTextColor: SELECTED_BG,
+              selectedDayBackgroundColor: SELECTED_BG,
+            }}
+          />
+        </View>
       ) : (
-        <WeekStrip
+        <SwipeableWeekStrip
           selectedDate={selectedDate}
           todayIso={initial.todayIso}
+          todayColor={profile?.color}
           onDateChange={navigateToDate}
         />
       )}
@@ -256,10 +261,8 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     gap: 8,
   },
-  toggleButton: { padding: 6 },
-  toggleButtonPressed: { opacity: 0.6 },
-  toggleChevron: { fontSize: 14, color: '#666' },
   monthLabel: { fontSize: 17, fontWeight: '600', color: '#111' },
+  monthGridWrap: { height: 360 },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fab: {
     position: 'absolute',

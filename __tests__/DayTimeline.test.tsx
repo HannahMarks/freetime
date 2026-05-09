@@ -38,7 +38,7 @@ describe('DayTimeline', () => {
   });
 
   it('positions a busy_block at the correct top + height for its start/end times', () => {
-    // 3pm-5pm = 2hrs; HOUR_HEIGHT=48 → top=720, height=96.
+    // 3pm-5pm = 2hrs; HOUR_HEIGHT=32 → top=15*32=480, height=2*32=64.
     const items: CalendarItem[] = [
       {
         kind: 'busy_block',
@@ -54,11 +54,11 @@ describe('DayTimeline', () => {
     ];
     render(<DayTimeline date={DAY} items={items} />);
     const block = screen.getByTestId('day-block-bb1');
-    expect(block).toHaveStyle({ top: 720, height: 96 });
+    expect(block).toHaveStyle({ top: 480, height: 64 });
   });
 
   it('handles half-hour offsets', () => {
-    // 3:30pm-4:45pm = 1.25hrs; top = 15.5*48 = 744, height = 1.25*48 = 60.
+    // 3:30pm-4:45pm = 1.25hrs; top = 15.5*32 = 496, height = 1.25*32 = 40.
     const items: CalendarItem[] = [
       {
         kind: 'busy_block',
@@ -73,7 +73,7 @@ describe('DayTimeline', () => {
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
-    expect(screen.getByTestId('day-block-bb1')).toHaveStyle({ top: 744, height: 60 });
+    expect(screen.getByTestId('day-block-bb1')).toHaveStyle({ top: 496, height: 40 });
   });
 
   it('uses the user color for the block (border-left + translucent fill)', () => {
@@ -177,21 +177,21 @@ describe('DayTimeline', () => {
     };
 
     it('clips a multi-day block to 18:00 → end-of-day on the start day', () => {
-      // visibleStart=18:00, visibleEnd=24:00 → top=18*48=864, height=6*48=288.
+      // visibleStart=18:00, visibleEnd=24:00 → top=18*32=576, height=6*32=192.
       render(<DayTimeline date="2026-05-13" items={[trip]} />);
-      expect(screen.getByTestId('day-block-trip')).toHaveStyle({ top: 864, height: 288 });
+      expect(screen.getByTestId('day-block-trip')).toHaveStyle({ top: 576, height: 192 });
     });
 
     it('renders a fully-spanned middle day as 0:00 → 24:00', () => {
-      // visibleStart=00:00, visibleEnd=24:00 → top=0, height=24*48=1152.
+      // visibleStart=00:00, visibleEnd=24:00 → top=0, height=24*32=768.
       render(<DayTimeline date="2026-05-14" items={[trip]} />);
-      expect(screen.getByTestId('day-block-trip')).toHaveStyle({ top: 0, height: 1152 });
+      expect(screen.getByTestId('day-block-trip')).toHaveStyle({ top: 0, height: 768 });
     });
 
     it('clips to 0:00 → 09:00 on the end day', () => {
-      // visibleStart=00:00, visibleEnd=09:00 → top=0, height=9*48=432.
+      // visibleStart=00:00, visibleEnd=09:00 → top=0, height=9*32=288.
       render(<DayTimeline date="2026-05-15" items={[trip]} />);
-      expect(screen.getByTestId('day-block-trip')).toHaveStyle({ top: 0, height: 432 });
+      expect(screen.getByTestId('day-block-trip')).toHaveStyle({ top: 0, height: 288 });
     });
 
     it('does not render the block on a date outside its range', () => {
@@ -218,7 +218,7 @@ describe('DayTimeline', () => {
 
     it('renders the early portion of an overnight block on the start day', () => {
       // 11pm to 1am-next-day, displayed on start day → 23:00 → 24:00.
-      // top = 23*48 = 1104, height = 1*48 = 48.
+      // top = 23*32 = 736, height = 1*32 = 32.
       const overnight: CalendarItem = {
         kind: 'busy_block',
         id: 'on1',
@@ -232,12 +232,12 @@ describe('DayTimeline', () => {
         location: null,
       };
       render(<DayTimeline date="2026-05-13" items={[overnight]} />);
-      expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 1104, height: 48 });
+      expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 736, height: 32 });
     });
 
     it('renders the tail portion of an overnight block on the end day', () => {
       // Same overnight block, displayed on May 14 → 0:00 → 1:00.
-      // top = 0, height = 1*48 = 48.
+      // top = 0, height = 1*32 = 32.
       const overnight: CalendarItem = {
         kind: 'busy_block',
         id: 'on1',
@@ -251,7 +251,7 @@ describe('DayTimeline', () => {
         location: null,
       };
       render(<DayTimeline date="2026-05-14" items={[overnight]} />);
-      expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 0, height: 48 });
+      expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 0, height: 32 });
     });
   });
 });

@@ -27,18 +27,20 @@ jest.mock('../lib/auth', () => ({
   }),
 }));
 
-// Stub react-native-calendars and capture the most recent props so tests can
-// read the markings + simulate day-press / month-change interactions.
+// Stub react-native-calendars' CalendarList and capture the most recent
+// props so tests can read the markings + simulate day-press /
+// month-change interactions. (We switched from Calendar to CalendarList
+// horizontal+pagingEnabled for the smooth between-months slide.)
 let lastCalendarProps: {
   current?: string;
   markedDates?: Record<string, unknown>;
   onDayPress?: (d: { dateString: string }) => void;
-  onMonthChange?: (d: { year: number; month: number }) => void;
+  onVisibleMonthsChange?: (months: { year: number; month: number }[]) => void;
 } = {};
 
 jest.mock('react-native-calendars', () => {
   return {
-    Calendar: (props: typeof lastCalendarProps) => {
+    CalendarList: (props: typeof lastCalendarProps) => {
       lastCalendarProps = props;
       const React = require('react');
       const { View } = require('react-native');
@@ -47,10 +49,9 @@ jest.mock('react-native-calendars', () => {
   };
 });
 
-// Mock the carousel as a thin shim that renders only the centered pane,
-// so existing day-block testID assertions (which expected one DayTimeline
-// per screen) keep working. The horizontal-swipe gesture is verified
-// manually on device — not jest-testable.
+// Mock the carousels as thin shims that render only the centered pane,
+// so existing testID assertions keep working. The horizontal-swipe
+// gesture mechanics are verified manually on device — not jest-testable.
 jest.mock('../components/SwipeableDayCarousel', () => {
   const React = require('react');
   const { DayTimeline } = require('../components/DayTimeline');
@@ -74,6 +75,19 @@ jest.mock('../components/SwipeableDayCarousel', () => {
         refreshControl: props.refreshControl,
       });
     },
+  };
+});
+
+jest.mock('../components/SwipeableWeekStrip', () => {
+  const React = require('react');
+  const { WeekStrip } = require('../components/WeekStrip');
+  return {
+    SwipeableWeekStrip: (props: {
+      selectedDate: string;
+      todayIso: string;
+      todayColor?: string;
+      onDateChange: (newDate: string) => void;
+    }) => React.createElement(WeekStrip, props),
   };
 });
 
@@ -341,7 +355,9 @@ describe('CalendarScreen', () => {
     expect(mockedList).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      lastCalendarProps.onMonthChange?.({ year: 2026, month: 6 });
+      // CalendarList signals month change with onVisibleMonthsChange,
+      // an array of currently-visible months.
+      lastCalendarProps.onVisibleMonthsChange?.([{ year: 2026, month: 6 }]);
     });
     await flushAsync();
 
