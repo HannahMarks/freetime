@@ -1,5 +1,6 @@
 import {
   buildAgenda,
+  BusyBlockItem,
   CalendarItem,
   combineDateAndTime,
   computeMarkings,
@@ -10,6 +11,8 @@ import {
   monthRange,
   nextNDays,
   parseTime,
+  shiftBlockByMinutes,
+  snapMinutes,
 } from '../lib/calendar-helpers';
 
 const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
@@ -402,5 +405,75 @@ describe('buildAgenda', () => {
     const agenda = buildAgenda(items, dateKeys, today);
     expect((agenda[0].items[0] as { id: string }).id).toBe('early');
     expect((agenda[0].items[1] as { id: string }).id).toBe('late');
+  });
+});
+
+describe('snapMinutes', () => {
+  it('snaps to the nearest multiple of `snap`', () => {
+    expect(snapMinutes(0, 15)).toBe(0);
+    expect(snapMinutes(7, 15)).toBe(0);
+    expect(snapMinutes(8, 15)).toBe(15);
+    expect(snapMinutes(22, 15)).toBe(15);
+    expect(snapMinutes(23, 15)).toBe(30);
+    expect(snapMinutes(60, 15)).toBe(60);
+  });
+
+  it('handles negative minutes (drag up = past)', () => {
+    expect(snapMinutes(-7, 15)).toBe(-0); // -0 is fine
+    expect(snapMinutes(-8, 15)).toBe(-15);
+    expect(snapMinutes(-23, 15)).toBe(-30);
+  });
+
+  it('snaps to other intervals', () => {
+    expect(snapMinutes(13, 30)).toBe(0);
+    expect(snapMinutes(15, 30)).toBe(30);
+    expect(snapMinutes(45, 30)).toBe(60);
+  });
+});
+
+describe('shiftBlockByMinutes', () => {
+  const block: BusyBlockItem = {
+    kind: 'busy_block',
+    id: 'bb1',
+    user: alice,
+    startsAt: new Date(2026, 4, 13, 12, 0),
+    endsAt: new Date(2026, 4, 13, 13, 30),
+    title: 'Lunch',
+    notes: null,
+    location: null,
+  };
+
+  it('shifts both endpoints by the same amount, preserving duration', () => {
+    const out = shiftBlockByMinutes(block, 30);
+    expect(out.startsAt).toEqual(new Date(2026, 4, 13, 12, 30));
+    expect(out.endsAt).toEqual(new Date(2026, 4, 13, 14, 0));
+    // Duration unchanged.
+    expect(out.endsAt.getTime() - out.startsAt.getTime()).toBe(
+      block.endsAt.getTime() - block.startsAt.getTime(),
+    );
+  });
+
+  it('handles negative deltas (drag earlier)', () => {
+    const out = shiftBlockByMinutes(block, -90);
+    expect(out.startsAt).toEqual(new Date(2026, 4, 13, 10, 30));
+    expect(out.endsAt).toEqual(new Date(2026, 4, 13, 12, 0));
+  });
+
+  it('returns the original endpoints (as new Dates) when delta is 0', () => {
+    const out = shiftBlockByMinutes(block, 0);
+    expect(out.startsAt.getTime()).toBe(block.startsAt.getTime());
+    expect(out.endsAt.getTime()).toBe(block.endsAt.getTime());
+  });
+
+  it('crosses day boundaries cleanly for multi-day shifts', () => {
+    // Shift a 5pm block by 9 hours → next day 2am.
+    const evening: BusyBlockItem = {
+      ...block,
+      startsAt: new Date(2026, 4, 13, 17, 0),
+      endsAt: new Date(2026, 4, 13, 18, 0),
+    };
+    const out = shiftBlockByMinutes(evening, 9 * 60);
+    expect(out.startsAt).toEqual(new Date(2026, 4, 14, 2, 0));
+    expect(out.endsAt).toEqual(new Date(2026, 4, 14, 3, 0));
   });
 });

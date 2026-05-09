@@ -11,8 +11,10 @@ import { Calendar, DateData } from 'react-native-calendars';
 import { AddItemSheet } from '../../components/AddItemSheet';
 import { DayTimeline } from '../../components/DayTimeline';
 import { useAuth } from '../../lib/auth';
+import { updateBusyBlock } from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
 import {
+  BusyBlockItem,
   CalendarItem,
   computeMarkings,
   formatDayLabel,
@@ -84,6 +86,27 @@ export default function CalendarScreen() {
     setAddOpen(true);
   }
 
+  async function handleItemReschedule(
+    item: BusyBlockItem,
+    newStart: Date,
+    newEnd: Date,
+  ) {
+    if (item.user.id !== session?.user.id) return;
+    const { error } = await updateBusyBlock({
+      id: item.id,
+      startsAt: newStart,
+      endsAt: newEnd,
+      title: item.title,
+      notes: item.notes,
+      location: item.location,
+    });
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    await fetchMonth();
+  }
+
   function closeAddSheet() {
     setAddOpen(false);
     setEditing(null);
@@ -153,7 +176,9 @@ export default function CalendarScreen() {
         <DayTimeline
           date={selectedDate}
           items={selectedItems}
+          currentUserId={session?.user.id}
           onItemPress={handleItemPress}
+          onItemReschedule={handleItemReschedule}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }

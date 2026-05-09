@@ -187,6 +187,26 @@ export function formatTimeRange(startsAt: Date, endsAt: Date): string {
   return `${fmt.format(startsAt)} – ${fmt.format(endsAt)}`;
 }
 
+/** Round `minutes` to the nearest multiple of `snap`. Used to lock dragged
+ * blocks to 15-minute increments. */
+export function snapMinutes(minutes: number, snap: number): number {
+  return Math.round(minutes / snap) * snap;
+}
+
+/** Shift both endpoints of a busy_block by the same minute delta. Duration
+ * is preserved; the block can cross day boundaries. Used by the
+ * drag-to-reschedule gesture. */
+export function shiftBlockByMinutes(
+  item: BusyBlockItem,
+  deltaMinutes: number,
+): { startsAt: Date; endsAt: Date } {
+  const ms = deltaMinutes * 60_000;
+  return {
+    startsAt: new Date(item.startsAt.getTime() + ms),
+    endsAt: new Date(item.endsAt.getTime() + ms),
+  };
+}
+
 /**
  * Bucket calendar items into per-day agendas for a fixed list of dates.
  * Items outside `dateKeys` are dropped. Within a day, unavailable_day rows
