@@ -33,8 +33,13 @@ export function DismissibleMonthGrid({ onDismiss, children }: Props) {
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);
 
+  // Activation rules:
+  // - Only react to *upward* drags ≥ 10px (single-arg activeOffsetY).
+  // - Fail (let the touch fall through) on horizontal drags ≥ 15px so the
+  //   Calendar's own next-/prev-month swipe still works.
   const pan = Gesture.Pan()
-    .activeOffsetY([-15, 9999])
+    .activeOffsetY(-10)
+    .failOffsetX([-15, 15])
     .onUpdate((e) => {
       translateY.value = Math.min(0, e.translationY);
       opacity.value = Math.max(0, 1 + e.translationY / FADE_DISTANCE_PX);
@@ -57,7 +62,15 @@ export function DismissibleMonthGrid({ onDismiss, children }: Props) {
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View testID="dismissible-month-grid" style={animatedStyle}>
+      {/* `collapsable={false}` keeps the Animated.View as a real native
+          host on Android so it reliably receives touches inside the
+          GestureDetector — without this, RN may flatten the view away
+          and the gesture never fires. */}
+      <Animated.View
+        testID="dismissible-month-grid"
+        collapsable={false}
+        style={animatedStyle}
+      >
         {children}
       </Animated.View>
     </GestureDetector>

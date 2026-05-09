@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, useCallback } from 'react';
 import { Pressable, RefreshControlProps, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -181,6 +181,23 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
   const offsetY = useSharedValue(0);
   const isDragging = useSharedValue(0);
 
+  // The gesture's onEnd callback runs as a Reanimated worklet on the UI
+  // thread, so it can't call non-worklet JS functions like `snapMinutes`
+  // and `shiftBlockByMinutes` directly — that throws at runtime even
+  // though jest doesn't catch it (jest has no UI/JS thread split). All
+  // JS-side commit logic lives here and is invoked via runOnJS.
+  const commit = useCallback(
+    (translationY: number) => {
+      if (!onReschedule) return;
+      const rawDeltaMinutes = (translationY / HOUR_HEIGHT) * 60;
+      const snapped = snapMinutes(rawDeltaMinutes, SNAP_MINUTES);
+      if (snapped === 0) return;
+      const { startsAt, endsAt } = shiftBlockByMinutes(block, snapped);
+      onReschedule(block, startsAt, endsAt);
+    },
+    [block, onReschedule],
+  );
+
   const pan = Gesture.Pan()
     .activateAfterLongPress(LONG_PRESS_MS)
     .onStart(() => {
@@ -190,14 +207,9 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
       offsetY.value = e.translationY;
     })
     .onEnd((e) => {
-      const rawDeltaMinutes = (e.translationY / HOUR_HEIGHT) * 60;
-      const snapped = snapMinutes(rawDeltaMinutes, SNAP_MINUTES);
       offsetY.value = withTiming(0, { duration: 150 });
       isDragging.value = withTiming(0, { duration: 150 });
-      if (snapped !== 0 && onReschedule) {
-        const { startsAt, endsAt } = shiftBlockByMinutes(block, snapped);
-        runOnJS(onReschedule)(block, startsAt, endsAt);
-      }
+      runOnJS(commit)(e.translationY);
     })
     .enabled(owned && !!onReschedule);
 
@@ -210,8 +222,11 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
 
   return (
     <GestureDetector gesture={pan}>
+      {/* collapsable={false} keeps this view as a real native host so
+          the gesture-handler reliably receives touches on Android. */}
       <AnimatedPressable
         testID={`day-block-${block.id}`}
+        collapsable={false}
         onPress={onPress ? () => onPress(block) : undefined}
         style={[
           styles.block,
