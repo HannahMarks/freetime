@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { RefreshControlProps, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControlProps, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   BusyBlockItem,
   CalendarItem,
@@ -18,6 +18,12 @@ type Props = {
    * gesture works even though the parent layout doesn't scroll.
    */
   refreshControl?: ReactElement<RefreshControlProps>;
+  /**
+   * Tap handler for any item — banner or block. Called with the tapped item
+   * so the parent can decide what to do (today: confirm-delete; later:
+   * could open an edit sheet).
+   */
+  onItemPress?: (item: CalendarItem) => void;
 };
 
 /** Pretty hour label like "12 AM", "1 PM". */
@@ -45,7 +51,7 @@ function hexAlpha(hex: string, alpha: number): string {
  * blend rather than hide each other. A column-layout pass for true
  * side-by-side rendering can be added later if it gets crowded.
  */
-export function DayTimeline({ items, refreshControl }: Props) {
+export function DayTimeline({ items, refreshControl, onItemPress }: Props) {
   const blocks = items.filter((i): i is BusyBlockItem => i.kind === 'busy_block');
   const days = items.filter((i): i is UnavailableDayItem => i.kind === 'unavailable_day');
 
@@ -54,16 +60,21 @@ export function DayTimeline({ items, refreshControl }: Props) {
       {days.length > 0 ? (
         <View testID="day-timeline-banner" style={styles.banner}>
           {days.map((d) => (
-            <View
+            <Pressable
               key={`${d.user.id}:${d.date}`}
               testID={`day-banner-${d.user.id}`}
-              style={[styles.bannerItem, { backgroundColor: hexAlpha(d.user.color, 0.18), borderLeftColor: d.user.color }]}
+              onPress={onItemPress ? () => onItemPress(d) : undefined}
+              style={({ pressed }) => [
+                styles.bannerItem,
+                { backgroundColor: hexAlpha(d.user.color, 0.18), borderLeftColor: d.user.color },
+                pressed && styles.bannerItemPressed,
+              ]}
             >
               <Text style={styles.bannerTitle}>
                 {d.user.display_name}
                 {d.title ? ` · ${d.title}` : ' · Unavailable all day'}
               </Text>
-            </View>
+            </Pressable>
           ))}
         </View>
       ) : null}
@@ -97,10 +108,11 @@ export function DayTimeline({ items, refreshControl }: Props) {
           const height = Math.max((endHour - startHour) * HOUR_HEIGHT, 24);
 
           return (
-            <View
+            <Pressable
               key={block.id}
               testID={`day-block-${block.id}`}
-              style={[
+              onPress={onItemPress ? () => onItemPress(block) : undefined}
+              style={({ pressed }) => [
                 styles.block,
                 {
                   top,
@@ -108,6 +120,7 @@ export function DayTimeline({ items, refreshControl }: Props) {
                   backgroundColor: hexAlpha(block.user.color, 0.35),
                   borderLeftColor: block.user.color,
                 },
+                pressed && styles.blockPressed,
               ]}
             >
               <Text style={styles.blockTitle} numberOfLines={1}>
@@ -117,7 +130,7 @@ export function DayTimeline({ items, refreshControl }: Props) {
               <Text style={styles.blockTime} numberOfLines={1}>
                 {formatTimeRange(block.startsAt, block.endsAt)}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </ScrollView>
@@ -135,6 +148,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   bannerTitle: { fontSize: 14, color: '#111' },
+  bannerItemPressed: { opacity: 0.6 },
   timeline: { flex: 1 },
   hourRow: {
     position: 'absolute',
@@ -165,6 +179,7 @@ const styles = StyleSheet.create({
     padding: 6,
     overflow: 'hidden',
   },
+  blockPressed: { opacity: 0.8 },
   blockTitle: { fontSize: 13, fontWeight: '600', color: '#111' },
   blockTime: { fontSize: 11, color: '#444', marginTop: 2 },
 });

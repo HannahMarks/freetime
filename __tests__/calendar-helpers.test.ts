@@ -1,6 +1,7 @@
 import {
   buildAgenda,
   CalendarItem,
+  combineDateAndTime,
   computeMarkings,
   formatDayLabel,
   formatTimeRange,
@@ -8,6 +9,7 @@ import {
   itemsOnDate,
   monthRange,
   nextNDays,
+  parseTime,
 } from '../lib/calendar-helpers';
 
 const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
@@ -77,6 +79,50 @@ describe('formatTimeRange', () => {
     expect(out).toMatch(/^.+–.+$/);
     expect(out).toMatch(/12/);
     expect(out).toMatch(/1:30|13:30/);
+  });
+});
+
+describe('parseTime', () => {
+  it('parses 24-hour HH:MM', () => {
+    expect(parseTime('14:30')).toEqual({ hour: 14, minute: 30 });
+    expect(parseTime('09:00')).toEqual({ hour: 9, minute: 0 });
+    expect(parseTime('00:00')).toEqual({ hour: 0, minute: 0 });
+    expect(parseTime('23:59')).toEqual({ hour: 23, minute: 59 });
+  });
+
+  it('parses single-digit hour with no leading zero', () => {
+    expect(parseTime('9:00')).toEqual({ hour: 9, minute: 0 });
+    expect(parseTime('9')).toEqual({ hour: 9, minute: 0 });
+  });
+
+  it('parses 12-hour with AM/PM (case-insensitive, optional space)', () => {
+    expect(parseTime('9:00 AM')).toEqual({ hour: 9, minute: 0 });
+    expect(parseTime('9:00 PM')).toEqual({ hour: 21, minute: 0 });
+    expect(parseTime('9:00am')).toEqual({ hour: 9, minute: 0 });
+    expect(parseTime('9 PM')).toEqual({ hour: 21, minute: 0 });
+    expect(parseTime('12:00 AM')).toEqual({ hour: 0, minute: 0 });
+    expect(parseTime('12:00 PM')).toEqual({ hour: 12, minute: 0 });
+  });
+
+  it('returns null for malformed inputs', () => {
+    expect(parseTime('')).toBeNull();
+    expect(parseTime('xyz')).toBeNull();
+    expect(parseTime('25:00')).toBeNull();
+    expect(parseTime('9:60')).toBeNull();
+    expect(parseTime('13 PM')).toBeNull(); // 12-hour can't be 13
+    expect(parseTime('0 PM')).toBeNull();
+    expect(parseTime('9:00 XX')).toBeNull();
+  });
+});
+
+describe('combineDateAndTime', () => {
+  it('combines a YYYY-MM-DD date and hour/minute into a local-zone Date', () => {
+    const out = combineDateAndTime('2026-05-13', { hour: 14, minute: 30 });
+    expect(out.getFullYear()).toBe(2026);
+    expect(out.getMonth()).toBe(4); // May = 4
+    expect(out.getDate()).toBe(13);
+    expect(out.getHours()).toBe(14);
+    expect(out.getMinutes()).toBe(30);
   });
 });
 

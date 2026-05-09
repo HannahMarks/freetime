@@ -103,8 +103,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ Auth flow — email sign up / sign in / sign out, profile creation with display name + hex color picker ([#8](https://github.com/HannahMarks/freetime/pull/8))
 - ✅ Friends — list, search by name, send / accept / decline / cancel / remove ([#9](https://github.com/HannahMarks/freetime/pull/9))
 - ✅ Schema for `busy_blocks` (named time-ranged activities) + `unavailable_days` (whole-day floating-date markers) + `is_friend_of()` RLS helper ([#11](https://github.com/HannahMarks/freetime/pull/11))
-- 🚧 Calendar view — month grid with friend-colored dots, jump between months, tap a day to see what's on
-- ⏳ Availability editing — add / edit / delete your own time blocks
+- ✅ Calendar view — month grid with friend-colored dots + per-day 24-hour timeline + collapsible month grid ([#17](https://github.com/HannahMarks/freetime/pull/17), [#18](https://github.com/HannahMarks/freetime/pull/18))
+- 🚧 Availability editing — FAB-launched add sheet for activities + unavailable days, tap-to-delete on your own items
 
 ### Phase 2 — events + invites
 

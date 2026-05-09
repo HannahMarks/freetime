@@ -111,6 +111,38 @@ export function formatDayLabel(date: string, today: Date = new Date()): string {
   });
 }
 
+/**
+ * Parse a user-entered time string into hour + minute (24h).
+ * Accepts: "9:00", "09:00", "9:00 AM", "9 AM", "9pm", "14:30".
+ * Returns null on anything malformed.
+ */
+export function parseTime(input: string): { hour: number; minute: number } | null {
+  const m = input.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (!m) return null;
+  let hour = parseInt(m[1], 10);
+  const minute = m[2] ? parseInt(m[2], 10) : 0;
+  const ampm = m[3]?.toUpperCase();
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
+  if (ampm) {
+    if (hour < 1 || hour > 12) return null;
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+  } else {
+    if (hour < 0 || hour > 23) return null;
+  }
+  if (minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
+
+/** Combine a YYYY-MM-DD date with hour+minute into a local-zone Date. */
+export function combineDateAndTime(
+  dateStr: string,
+  time: { hour: number; minute: number },
+): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d, time.hour, time.minute, 0, 0);
+}
+
 /** "12:00 PM – 1:00 PM" style range, locale-aware. */
 export function formatTimeRange(startsAt: Date, endsAt: Date): string {
   const fmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
