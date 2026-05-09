@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -195,6 +195,14 @@ export default function CalendarScreen() {
 
   const monthInitial = `${month.year}-${String(month.monthIndex + 1).padStart(2, '0')}-01`;
 
+  // CalendarList scrolls smoothly only when its `current` prop is stable
+  // across re-renders. Each time `monthInitial` changes (via the user
+  // paging the grid → setMonth via onVisibleMonthsChange) we'd otherwise
+  // push a "new" current at it and it could yank the scroll position.
+  // Capture the value once on first render and pass that — CalendarList
+  // manages its own internal scroll position thereafter.
+  const initialCalendarMonthRef = useRef(monthInitial);
+
   return (
     <View style={styles.container}>
       {/* Header: chevron toggle on the left, month label next to it. */}
@@ -204,7 +212,11 @@ export default function CalendarScreen() {
           onPress={() => setMonthVisible((v) => !v)}
         />
         <Text style={styles.monthLabel} testID="month-label">
-          {formatMonthLabel(selectedDate, initial.today.getFullYear())}
+          {/* Tracks the *visible* month (`month` state), not the
+              selected day's month — when the user pages the grid into
+              another month or swipes the day timeline across a
+              boundary, the label follows. */}
+          {formatMonthLabel(monthInitial, initial.today.getFullYear())}
         </Text>
       </View>
 
@@ -217,13 +229,18 @@ export default function CalendarScreen() {
         {monthVisible ? (
           <CalendarList
             testID="calendar-grid"
-            current={monthInitial}
+            current={initialCalendarMonthRef.current}
             markedDates={markedDates}
             markingType="multi-dot"
             horizontal
             pagingEnabled
             pastScrollRange={12}
             futureScrollRange={12}
+            // Our outer chevron + month label IS the header. The
+            // package's per-month header (month name + < > arrows
+            // inside the grid) is redundant — hide it.
+            renderHeader={() => null}
+            hideArrows
             onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
             onVisibleMonthsChange={(months: DateData[]) => {
               if (months.length > 0) {

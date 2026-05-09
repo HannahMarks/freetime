@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -9,7 +9,11 @@ import Animated, {
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
 
-const ROTATION_DURATION_MS = 200;
+const ROTATION_DURATION_MS = 240;
+/** Visual center of the chevron glyph and of the adjacent month label
+ * are aligned by rendering both inside line boxes of this exact height
+ * with `justifyContent: 'center'`. */
+const ALIGN_LINE_HEIGHT = 22;
 
 type Props = {
   /** True when the month grid is expanded (chevron points up). */
@@ -45,7 +49,13 @@ export function MonthToggleChevron({ expanded, onPress }: Props) {
       hitSlop={12}
       style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
     >
-      <AnimatedText style={[styles.chevron, animatedStyle]}>⌄</AnimatedText>
+      {/* Fixed-height box centers the glyph vertically. With the parent
+          row using alignItems: 'center', this puts the glyph's visual
+          center exactly at the row's middle line — same as the
+          adjacent month label. */}
+      <View style={styles.glyphBox}>
+        <AnimatedText style={[styles.chevron, animatedStyle]}>⌄</AnimatedText>
+      </View>
     </Pressable>
   );
 }
@@ -54,19 +64,20 @@ const styles = StyleSheet.create({
   button: {
     paddingHorizontal: 2,
     paddingVertical: 0,
-    // Keeps the touchable area generous via hitSlop without inflating
-    // the laid-out box, so the chevron lines up with the month label
-    // baseline in the parent's flex row.
   },
   buttonPressed: { opacity: 0.6 },
+  glyphBox: {
+    height: ALIGN_LINE_HEIGHT,
+    width: ALIGN_LINE_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   chevron: {
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 16,
     color: '#444',
-    fontWeight: '600',
-    // textAlignVertical helps Android render the glyph centered in its
-    // line-box (otherwise chevron sits a bit too high relative to the
-    // adjacent month label).
-    textAlignVertical: 'center',
+    fontWeight: '700',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 });
