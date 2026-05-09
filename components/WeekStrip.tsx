@@ -47,7 +47,15 @@ export function WeekStrip({ selectedDate, todayIso, todayColor, onDateChange }: 
           accessibilityRole="button"
           accessibilityLabel={`${cell.label} ${cell.day}${cell.isSelected ? ' selected' : ''}`}
         >
-          <Text style={[styles.dayLabel, cell.isSelected && styles.dayLabelSelected]}>
+          <Text
+            style={[
+              styles.dayLabel,
+              cell.isSelected && styles.dayLabelSelected,
+              !cell.isSelected && cell.isToday && todayColor
+                ? { color: todayColor, fontWeight: '600' as const }
+                : null,
+            ]}
+          >
             {cell.label}
           </Text>
           <View

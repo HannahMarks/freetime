@@ -51,11 +51,22 @@ export function MonthToggleChevron({ expanded, onPress }: Props) {
 }
 
 const styles = StyleSheet.create({
-  button: { padding: 6 },
+  button: {
+    paddingHorizontal: 2,
+    paddingVertical: 0,
+    // Keeps the touchable area generous via hitSlop without inflating
+    // the laid-out box, so the chevron lines up with the month label
+    // baseline in the parent's flex row.
+  },
   buttonPressed: { opacity: 0.6 },
   chevron: {
-    fontSize: 18,
-    color: '#666',
-    fontWeight: '300',
+    fontSize: 17,
+    lineHeight: 22,
+    color: '#444',
+    fontWeight: '600',
+    // textAlignVertical helps Android render the glyph centered in its
+    // line-box (otherwise chevron sits a bit too high relative to the
+    // adjacent month label).
+    textAlignVertical: 'center',
   },
 });

@@ -154,16 +154,34 @@ describe('CalendarScreen', () => {
     expect(todayMarking.selected).toBe(true);
   });
 
-  it('renders the month label in the header', async () => {
+  it('renders the month label in the header without the year when in the current calendar year', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);
     await flushAsync();
 
-    // Locale-dependent exact format — assert it contains the year and "May"
-    // (the test clock is set to 2026-05-13).
+    // Test clock is 2026-05-13 — selectedDate is in 2026, today is in 2026,
+    // so the year is omitted ("May" not "May 2026").
     const label = screen.getByTestId('month-label');
     expect(label.props.children).toMatch(/May/);
-    expect(label.props.children).toMatch(/2026/);
+    expect(label.props.children).not.toMatch(/2026/);
+  });
+
+  it('includes the year in the month label when scrolled into a different year', async () => {
+    mockedList.mockResolvedValue({ data: [], error: null });
+    render(<CalendarScreen />);
+    await flushAsync();
+
+    // Tap a day in next May (2027) via the week strip's underlying onDateChange
+    // path — exposed indirectly here by triggering navigateToDate via the
+    // grid's onDayPress (after toggling the grid open).
+    showGrid();
+    await act(async () => {
+      lastCalendarProps.onDayPress?.({ dateString: '2027-05-13' });
+    });
+
+    const label = screen.getByTestId('month-label');
+    expect(label.props.children).toMatch(/May/);
+    expect(label.props.children).toMatch(/2027/);
   });
 
   it('renders the week strip with the selected day highlighted', async () => {
