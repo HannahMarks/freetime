@@ -17,6 +17,7 @@ import {
 } from '../lib/availability-actions';
 import { CalendarItem } from '../lib/calendar-helpers';
 import { toast } from '../lib/toast';
+import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
 
 type Kind = 'busy' | 'unavailable';
@@ -38,6 +39,35 @@ type Props = {
 function buildDate(dateStr: string, hour: number, minute: number): Date {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d, hour, minute, 0, 0);
+}
+
+/** Replace the year/month/day of `prev` with those of `picked`, preserving
+ * `prev`'s hour and minute. Used so picking a date doesn't clobber the
+ * already-picked time. */
+function withDate(prev: Date, picked: Date): Date {
+  return new Date(
+    picked.getFullYear(),
+    picked.getMonth(),
+    picked.getDate(),
+    prev.getHours(),
+    prev.getMinutes(),
+    0,
+    0,
+  );
+}
+
+/** Replace the hour/minute of `prev` with those of `picked`, preserving
+ * `prev`'s date. */
+function withTime(prev: Date, picked: Date): Date {
+  return new Date(
+    prev.getFullYear(),
+    prev.getMonth(),
+    prev.getDate(),
+    picked.getHours(),
+    picked.getMinutes(),
+    0,
+    0,
+  );
 }
 
 /**
@@ -188,11 +218,33 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
               <>
                 <View style={styles.timeRow}>
                   <Text style={styles.label}>Starts</Text>
-                  <TimePicker testID="time-picker-start" value={start} onChange={setStart} />
+                  <View style={styles.pickerGroup}>
+                    <DatePicker
+                      testID="date-picker-start"
+                      value={start}
+                      onChange={(picked) => setStart((prev) => withDate(prev, picked))}
+                    />
+                    <TimePicker
+                      testID="time-picker-start"
+                      value={start}
+                      onChange={(picked) => setStart((prev) => withTime(prev, picked))}
+                    />
+                  </View>
                 </View>
                 <View style={styles.timeRow}>
                   <Text style={styles.label}>Ends</Text>
-                  <TimePicker testID="time-picker-end" value={end} onChange={setEnd} />
+                  <View style={styles.pickerGroup}>
+                    <DatePicker
+                      testID="date-picker-end"
+                      value={end}
+                      onChange={(picked) => setEnd((prev) => withDate(prev, picked))}
+                    />
+                    <TimePicker
+                      testID="time-picker-end"
+                      value={end}
+                      onChange={(picked) => setEnd((prev) => withTime(prev, picked))}
+                    />
+                  </View>
                 </View>
               </>
             ) : null}
@@ -270,6 +322,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  pickerGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
   },
   actions: { flexDirection: 'row', gap: 10, marginTop: 8 },
   cancel: {

@@ -143,18 +143,20 @@ describe('AddItemSheet', () => {
   });
 
   it('preserves the picked time when the start date is changed', async () => {
-    // User picks a time first, then changes the date — the time must
-    // survive the date pick.
+    // User picks times first, then bumps both dates to a future day — the
+    // hours/minutes must survive the date pick.
     mockedCreateBusy.mockResolvedValue({ error: null });
     render(<AddItemSheet {...baseProps} />);
 
     await act(async () => {
       const times = pickersByTestID();
       times['time-picker-start'].onChange?.(new Date(2026, 4, 13, 14, 30));
+      times['time-picker-end'].onChange?.(new Date(2026, 4, 13, 16, 0));
     });
     await act(async () => {
       const dates = datePickersByTestID();
       dates['date-picker-start'].onChange?.(new Date(2026, 4, 16));
+      dates['date-picker-end'].onChange?.(new Date(2026, 4, 16));
     });
 
     fireEvent.press(screen.getByLabelText('Save'));
@@ -163,6 +165,8 @@ describe('AddItemSheet', () => {
     expect(call.startsAt.getDate()).toBe(16);
     expect(call.startsAt.getHours()).toBe(14);
     expect(call.startsAt.getMinutes()).toBe(30);
+    expect(call.endsAt.getDate()).toBe(16);
+    expect(call.endsAt.getHours()).toBe(16);
   });
 
   it('toasts and does not save when end is before start across days', async () => {

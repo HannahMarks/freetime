@@ -36,11 +36,15 @@ function describeError(err: unknown): string {
 
 /**
  * Fetch all calendar items (busy_blocks + unavailable_days) for self
- * and accepted friends within `[fromDate, toDate)`.
+ * and accepted friends that overlap `[fromDate, toDate)`.
  *
  * RLS filters the friend graph automatically — we get the union of own
  * rows and rows owned by users with an accepted friendship to the
  * caller, no client-side joining needed.
+ *
+ * Multi-day blocks: a block belongs to the window when it starts before
+ * `toDate` AND ends after `fromDate`. This catches blocks that started
+ * before `fromDate` but extend into the range.
  *
  * Date strings are YYYY-MM-DD and Postgres casts them to timestamptz
  * at UTC midnight when comparing against `busy_blocks.starts_at`. For
@@ -56,8 +60,8 @@ export async function listCalendarItems(args: {
     supabase
       .from('busy_blocks')
       .select(BUSY_SELECT)
-      .gte('starts_at', args.fromDate)
-      .lt('starts_at', args.toDate),
+      .lt('starts_at', args.toDate)
+      .gt('ends_at', args.fromDate),
     supabase
       .from('unavailable_days')
       .select(UNAVAIL_SELECT)
