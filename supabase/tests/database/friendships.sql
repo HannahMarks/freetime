@@ -3,23 +3,25 @@
 
 begin;
 
-select plan(15);
+select plan(18);
 
 -- ────────────────────────────────────────────────────────────────────
 -- Schema shape
+-- (4-arg form for has_column / col_* avoids pgTAP overload ambiguity
+-- with the (table, column, description) variant.)
 -- ────────────────────────────────────────────────────────────────────
 
 select has_table('public', 'friendships', 'friendships table exists');
-select has_column('public', 'friendships', 'id');
-select has_column('public', 'friendships', 'requester_id');
-select has_column('public', 'friendships', 'addressee_id');
-select has_column('public', 'friendships', 'status');
-select has_column('public', 'friendships', 'created_at');
-select has_column('public', 'friendships', 'updated_at');
+select has_column('public', 'friendships', 'id', 'friendships has id');
+select has_column('public', 'friendships', 'requester_id', 'friendships has requester_id');
+select has_column('public', 'friendships', 'addressee_id', 'friendships has addressee_id');
+select has_column('public', 'friendships', 'status', 'friendships has status');
+select has_column('public', 'friendships', 'created_at', 'friendships has created_at');
+select has_column('public', 'friendships', 'updated_at', 'friendships has updated_at');
 
-select col_not_null('public', 'friendships', 'requester_id');
-select col_not_null('public', 'friendships', 'addressee_id');
-select col_not_null('public', 'friendships', 'status');
+select col_not_null('public', 'friendships', 'requester_id', 'requester_id is NOT NULL');
+select col_not_null('public', 'friendships', 'addressee_id', 'addressee_id is NOT NULL');
+select col_not_null('public', 'friendships', 'status', 'status is NOT NULL');
 
 select is(
   (select relrowsecurity from pg_class where oid = 'public.friendships'::regclass),
@@ -28,7 +30,7 @@ select is(
 );
 
 -- ────────────────────────────────────────────────────────────────────
--- Setup: two profiles via auth.users + trigger
+-- Setup: three profiles via auth.users + trigger
 -- ────────────────────────────────────────────────────────────────────
 
 set local role postgres;
@@ -72,7 +74,7 @@ select results_eq(
   'Alice can request friendship as herself'
 );
 
--- Alice trying to insert as Bob → blocked by RLS WITH CHECK
+-- Alice trying to insert as Bob → blocked by RLS WITH CHECK (42501).
 select throws_ok(
   $$insert into public.friendships (requester_id, addressee_id)
     values ('00000000-0000-0000-0000-00000000bbb2', '00000000-0000-0000-0000-00000000ccc3')$$,
@@ -97,8 +99,6 @@ select throws_ok(
 -- RLS: addressee can accept; requester cannot self-accept
 -- ────────────────────────────────────────────────────────────────────
 
-set local "request.jwt.claims" to '{"sub":"00000000-0000-0000-0000-00000000aaa1","role":"authenticated"}';
-
 update public.friendships set status = 'accepted'
 where requester_id = '00000000-0000-0000-0000-00000000aaa1'
   and addressee_id = '00000000-0000-0000-0000-00000000bbb2';
@@ -108,7 +108,7 @@ select results_eq(
     where requester_id = '00000000-0000-0000-0000-00000000aaa1'
       and addressee_id = '00000000-0000-0000-0000-00000000bbb2'$$,
   $$values ('pending'::text)$$,
-  'requester cannot accept their own outgoing request (RLS filters UPDATE row)'
+  'requester cannot accept their own outgoing request (RLS filters UPDATE)'
 );
 
 set local "request.jwt.claims" to '{"sub":"00000000-0000-0000-0000-00000000bbb2","role":"authenticated"}';

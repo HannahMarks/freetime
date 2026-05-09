@@ -3,26 +3,28 @@
 
 begin;
 
-select plan(20);
+select plan(19);
 
 -- ────────────────────────────────────────────────────────────────────
 -- Schema shape
+-- (4-arg form for has_column / col_* avoids pgTAP overload ambiguity
+-- with the (table, column, description) variant.)
 -- ────────────────────────────────────────────────────────────────────
 
 select has_table('public', 'profiles', 'profiles table exists');
 
-select has_column('public', 'profiles', 'id');
-select has_column('public', 'profiles', 'display_name');
-select has_column('public', 'profiles', 'color');
-select has_column('public', 'profiles', 'created_at');
-select has_column('public', 'profiles', 'updated_at');
+select has_column('public', 'profiles', 'id', 'profiles has id');
+select has_column('public', 'profiles', 'display_name', 'profiles has display_name');
+select has_column('public', 'profiles', 'color', 'profiles has color');
+select has_column('public', 'profiles', 'created_at', 'profiles has created_at');
+select has_column('public', 'profiles', 'updated_at', 'profiles has updated_at');
 
 select col_type_is('public', 'profiles', 'id', 'uuid', 'id is uuid');
 select col_type_is('public', 'profiles', 'display_name', 'text', 'display_name is text');
 select col_type_is('public', 'profiles', 'color', 'text', 'color is text');
 
-select col_not_null('public', 'profiles', 'display_name');
-select col_not_null('public', 'profiles', 'color');
+select col_not_null('public', 'profiles', 'display_name', 'display_name is NOT NULL');
+select col_not_null('public', 'profiles', 'color', 'color is NOT NULL');
 
 select col_is_pk('public', 'profiles', 'id', 'id is the primary key');
 
@@ -43,31 +45,16 @@ select is(
 set local role postgres;
 
 insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, aud, role)
-values (
-  '00000000-0000-0000-0000-00000000aaa1',
-  'alice@example.test',
-  '',
-  now(),
-  '{"display_name": "Alice", "color": "#FF6B6B"}'::jsonb,
-  'authenticated',
-  'authenticated'
-);
-
-insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, aud, role)
-values (
-  '00000000-0000-0000-0000-00000000bbb2',
-  'bob@example.test',
-  '',
-  now(),
-  '{"display_name": "Bob", "color": "#4ECDC4"}'::jsonb,
-  'authenticated',
-  'authenticated'
-);
+values
+  ('00000000-0000-0000-0000-00000000aaa1', 'alice@example.test', '', now(),
+   '{"display_name":"Alice","color":"#FF6B6B"}'::jsonb, 'authenticated', 'authenticated'),
+  ('00000000-0000-0000-0000-00000000bbb2', 'bob@example.test', '', now(),
+   '{"display_name":"Bob","color":"#4ECDC4"}'::jsonb, 'authenticated', 'authenticated');
 
 select results_eq(
   $$select display_name, color from public.profiles where id = '00000000-0000-0000-0000-00000000aaa1'$$,
   $$values ('Alice'::text, '#FF6B6B'::text)$$,
-  'Profile auto-created from auth.users metadata'
+  'profile auto-created from auth.users metadata'
 );
 
 -- ────────────────────────────────────────────────────────────────────
@@ -104,7 +91,7 @@ update public.profiles set display_name = 'Hacked' where id = '00000000-0000-000
 select results_eq(
   $$select display_name from public.profiles where id = '00000000-0000-0000-0000-00000000bbb2'$$,
   $$values ('Bob'::text)$$,
-  'user cannot update another user''s profile (RLS silently filters the row out of UPDATE)'
+  'RLS silently filters UPDATE on rows the user does not own'
 );
 
 -- ────────────────────────────────────────────────────────────────────
