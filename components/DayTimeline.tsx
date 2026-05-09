@@ -16,13 +16,13 @@ import {
 } from '../lib/calendar-helpers';
 import { tickSnap } from '../lib/haptics';
 
-const HOUR_HEIGHT = 48;
+const HOUR_HEIGHT = 32;
 const HOUR_LABEL_WIDTH = 56;
 const TOTAL_HEIGHT = HOUR_HEIGHT * 24;
 const SNAP_MINUTES = 15;
 const LONG_PRESS_MS = 250;
 const MS_PER_HOUR = 60 * 60 * 1000;
-const PIXELS_PER_MINUTE = HOUR_HEIGHT / 60; // 0.8
+const PIXELS_PER_MINUTE = HOUR_HEIGHT / 60; // 32/60 ≈ 0.533
 
 type Props = {
   /** YYYY-MM-DD of the day this timeline is rendering. Multi-day blocks

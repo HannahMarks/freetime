@@ -2,6 +2,7 @@ import { ReactElement } from 'react';
 import { RefreshControlProps, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -15,8 +16,9 @@ import {
 } from '../lib/calendar-helpers';
 import { DayTimeline } from './DayTimeline';
 
-const SLIDE_DURATION_MS = 220;
-const SPRING_BACK_DURATION_MS = 150;
+const SLIDE_DURATION_MS = 140;
+const SPRING_BACK_DURATION_MS = 120;
+const SLIDE_EASING = Easing.out(Easing.cubic);
 
 type Props = {
   /** YYYY-MM-DD of the day currently centered. */
@@ -89,7 +91,7 @@ export function SwipeableDayCarousel({
       if (e.translationX < -threshold) {
         translateX.value = withTiming(
           -screenWidth,
-          { duration: SLIDE_DURATION_MS },
+          { duration: SLIDE_DURATION_MS, easing: SLIDE_EASING },
           (finished) => {
             if (finished) runOnJS(commit)(nextDate);
           },
@@ -97,13 +99,16 @@ export function SwipeableDayCarousel({
       } else if (e.translationX > threshold) {
         translateX.value = withTiming(
           screenWidth,
-          { duration: SLIDE_DURATION_MS },
+          { duration: SLIDE_DURATION_MS, easing: SLIDE_EASING },
           (finished) => {
             if (finished) runOnJS(commit)(prevDate);
           },
         );
       } else {
-        translateX.value = withTiming(0, { duration: SPRING_BACK_DURATION_MS });
+        translateX.value = withTiming(0, {
+          duration: SPRING_BACK_DURATION_MS,
+          easing: SLIDE_EASING,
+        });
       }
     });
 

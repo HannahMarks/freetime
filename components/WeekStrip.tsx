@@ -6,15 +6,19 @@ const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 type Props = {
   /** YYYY-MM-DD that is currently selected and should be highlighted. */
   selectedDate: string;
-  /** YYYY-MM-DD for "today" — gets a subtle marker even when not selected. */
+  /** YYYY-MM-DD for "today". When today is not the selected day, its
+   * number is colored with `todayColor` (or a default bold style). */
   todayIso: string;
+  /** Hex color (e.g. "#9C27B0") used to tint today's number when it's
+   * visible but not the selected day. Defaults to bold-black. */
+  todayColor?: string;
   /** Tap handler — fires with the YYYY-MM-DD of the tapped day. */
   onDateChange: (newDate: string) => void;
 };
 
 /** Sunday–Saturday strip of date numbers for the week containing
  * `selectedDate`. Tap a day to select it. */
-export function WeekStrip({ selectedDate, todayIso, onDateChange }: Props) {
+export function WeekStrip({ selectedDate, todayIso, todayColor, onDateChange }: Props) {
   const [y, m, d] = selectedDate.split('-').map(Number);
   // Find the Sunday at or before `selectedDate`.
   const dow = new Date(y, m - 1, d).getDay(); // 0 = Sunday
@@ -56,7 +60,11 @@ export function WeekStrip({ selectedDate, todayIso, onDateChange }: Props) {
               style={[
                 styles.dayNumber,
                 cell.isSelected && styles.dayNumberSelected,
-                !cell.isSelected && cell.isToday && styles.dayNumberToday,
+                !cell.isSelected && cell.isToday
+                  ? todayColor
+                    ? { color: todayColor, fontWeight: '700' as const }
+                    : styles.dayNumberToday
+                  : null,
               ]}
             >
               {cell.day}
