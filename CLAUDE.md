@@ -39,3 +39,13 @@ Known constraints (verify before relying):
 Design data model and asset storage to comfortably fit under those limits — e.g., compress photo uploads aggressively, cap video length, don't store anything we can recompute. Avoid services that paywall basic features (auth, basic queries, basic storage).
 
 If a feature genuinely needs a paid tier, flag it explicitly and propose a free alternative or a deferred-until-it-matters approach.
+
+## Documentation — keep README current on every PR
+
+`README.md` is the single source of truth for what's shipped, how to set up, and what's coming next. Audit it on every PR and update anything that drifts. In particular:
+
+- **Roadmap.** When a PR ships a roadmap item, flip its bullet from ⏳/🚧 to ✅ and link the PR. When work is in flight, mark it 🚧. Don't let the roadmap fall behind reality.
+- **Setup, scripts, env vars.** New dep / new env var / new `npm run` script / changed setup step → README updates in the same PR.
+- **Distribution / CI.** New workflow, changed secret, new build profile → reflect in the Distribution / CI sections.
+
+Small README-only edits in a feature PR are normal and expected; this is not "do a doc PR later." If a PR genuinely changes nothing the README mentions (e.g. an internal refactor with no surface change), it's fine to skip — but the default is to check.
