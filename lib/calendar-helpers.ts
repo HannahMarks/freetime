@@ -60,27 +60,62 @@ export type Dot = { key: string; color: string };
 export type DateMarkings = Record<string, { dots: Dot[] }>;
 
 /**
+ * Local YYYY-MM-DD strings for every calendar day a busy_block touches.
+ * A block ending exactly at midnight (00:00:00.000) does *not* claim the
+ * next day — the next day is free.
+ */
+function spannedDates(startsAt: Date, endsAt: Date): string[] {
+  const startDay = new Date(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate());
+  const endDay = new Date(endsAt.getFullYear(), endsAt.getMonth(), endsAt.getDate());
+  const endIsMidnight =
+    endsAt.getHours() === 0 &&
+    endsAt.getMinutes() === 0 &&
+    endsAt.getSeconds() === 0 &&
+    endsAt.getMilliseconds() === 0;
+  const lastDay = endIsMidnight
+    ? new Date(endDay.getFullYear(), endDay.getMonth(), endDay.getDate() - 1)
+    : endDay;
+  if (lastDay < startDay) return [isoDate(startDay)];
+
+  const out: string[] = [];
+  const cursor = new Date(startDay);
+  while (cursor <= lastDay) {
+    out.push(isoDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+
+/**
  * Build per-date marking dots for the month grid. Each dot is keyed by the
  * owning user's id so the same friend never produces two dots on the same
- * day even if they have multiple busy_blocks that day.
+ * day even if they have multiple busy_blocks that day. Multi-day blocks
+ * mark every day they span.
  */
 export function computeMarkings(items: CalendarItem[]): DateMarkings {
   const result: DateMarkings = {};
-  for (const item of items) {
-    const dateKey = item.kind === 'busy_block' ? isoDate(item.startsAt) : item.date;
+  const addDot = (dateKey: string, item: CalendarItem) => {
     if (!result[dateKey]) result[dateKey] = { dots: [] };
     if (!result[dateKey].dots.some((d) => d.key === item.user.id)) {
       result[dateKey].dots.push({ key: item.user.id, color: item.user.color });
+    }
+  };
+  for (const item of items) {
+    if (item.kind === 'busy_block') {
+      for (const dateKey of spannedDates(item.startsAt, item.endsAt)) addDot(dateKey, item);
+    } else {
+      addDot(item.date, item);
     }
   }
   return result;
 }
 
-/** Items belonging to a single calendar day. */
+/** Items that touch a single calendar day. Multi-day busy_blocks match
+ * every day they span. */
 export function itemsOnDate(items: CalendarItem[], date: string): CalendarItem[] {
   return items.filter((item) => {
-    const key = item.kind === 'busy_block' ? isoDate(item.startsAt) : item.date;
-    return key === date;
+    if (item.kind === 'unavailable_day') return item.date === date;
+    return spannedDates(item.startsAt, item.endsAt).includes(date);
   });
 }
 

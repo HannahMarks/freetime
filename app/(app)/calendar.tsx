@@ -180,6 +180,7 @@ export default function CalendarScreen() {
         </View>
       ) : (
         <DayTimeline
+          date={selectedDate}
           items={selectedItems}
           onItemPress={handleItemPress}
           refreshControl={

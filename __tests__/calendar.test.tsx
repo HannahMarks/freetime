@@ -203,6 +203,45 @@ describe('CalendarScreen', () => {
     expect(screen.getByTestId('day-block-bb1')).toBeOnTheScreen();
   });
 
+  it('shows a multi-day busy_block on every day it spans', async () => {
+    mockedList.mockResolvedValue({
+      data: [
+        {
+          kind: 'busy_block',
+          id: 'trip',
+          user: alice,
+          startsAt: new Date(2026, 4, 13, 18, 0),
+          endsAt: new Date(2026, 4, 15, 9, 0),
+          title: 'Hiking',
+        },
+      ],
+      error: null,
+    });
+    render(<CalendarScreen />);
+    await flushAsync();
+
+    // Today (May 13) is a spanned day.
+    expect(screen.getByTestId('day-block-trip')).toBeOnTheScreen();
+
+    // Middle day.
+    await act(async () => {
+      lastCalendarProps.onDayPress?.({ dateString: '2026-05-14' });
+    });
+    expect(screen.getByTestId('day-block-trip')).toBeOnTheScreen();
+
+    // End day.
+    await act(async () => {
+      lastCalendarProps.onDayPress?.({ dateString: '2026-05-15' });
+    });
+    expect(screen.getByTestId('day-block-trip')).toBeOnTheScreen();
+
+    // Day after — block should be gone.
+    await act(async () => {
+      lastCalendarProps.onDayPress?.({ dateString: '2026-05-16' });
+    });
+    expect(screen.queryByTestId('day-block-trip')).toBeNull();
+  });
+
   it('refetches when the user navigates to a new month', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<CalendarScreen />);

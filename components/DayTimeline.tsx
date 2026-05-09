@@ -12,6 +12,9 @@ const HOUR_LABEL_WIDTH = 56;
 const TOTAL_HEIGHT = HOUR_HEIGHT * 24;
 
 type Props = {
+  /** YYYY-MM-DD of the day this timeline is rendering. Multi-day blocks
+   * are clipped to this day's window. */
+  date: string;
   items: CalendarItem[];
   /**
    * Optional pull-to-refresh handle. Wired into the inner ScrollView so the
@@ -51,9 +54,17 @@ function hexAlpha(hex: string, alpha: number): string {
  * blend rather than hide each other. A column-layout pass for true
  * side-by-side rendering can be added later if it gets crowded.
  */
-export function DayTimeline({ items, refreshControl, onItemPress }: Props) {
+const MS_PER_HOUR = 60 * 60 * 1000;
+
+export function DayTimeline({ date, items, refreshControl, onItemPress }: Props) {
   const blocks = items.filter((i): i is BusyBlockItem => i.kind === 'busy_block');
   const days = items.filter((i): i is UnavailableDayItem => i.kind === 'unavailable_day');
+
+  // 00:00 of `date` and 00:00 of the next day, both in local time. All
+  // block math is done in ms since `dayStart` and converted to hours.
+  const [yyyy, mm, dd] = date.split('-').map(Number);
+  const dayStart = new Date(yyyy, mm - 1, dd).getTime();
+  const dayEnd = new Date(yyyy, mm - 1, dd + 1).getTime();
 
   return (
     <View style={styles.container}>
@@ -96,14 +107,16 @@ export function DayTimeline({ items, refreshControl, onItemPress }: Props) {
           </View>
         ))}
 
-        {/* Busy block overlays */}
+        {/* Busy block overlays — clipped to `date`'s 24h window. A block
+            that started yesterday and ends tomorrow renders from 0 to 24
+            here; one that ends at exactly 00:00 of `date` doesn't render
+            at all. */}
         {blocks.map((block) => {
-          const startHour = block.startsAt.getHours() + block.startsAt.getMinutes() / 60;
-          const endHourRaw = block.endsAt.getHours() + block.endsAt.getMinutes() / 60;
-          // If the block crosses midnight in the user's local zone, clamp to
-          // end-of-day so the rectangle stays within the 24h window.
-          const endHour =
-            endHourRaw <= startHour ? 24 : Math.min(endHourRaw, 24);
+          const visibleStart = Math.max(block.startsAt.getTime(), dayStart);
+          const visibleEnd = Math.min(block.endsAt.getTime(), dayEnd);
+          if (visibleEnd <= visibleStart) return null;
+          const startHour = (visibleStart - dayStart) / MS_PER_HOUR;
+          const endHour = (visibleEnd - dayStart) / MS_PER_HOUR;
           const top = startHour * HOUR_HEIGHT;
           const height = Math.max((endHour - startHour) * HOUR_HEIGHT, 24);
 
