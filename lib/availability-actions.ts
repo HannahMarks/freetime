@@ -19,6 +19,8 @@ export async function createBusyBlock(args: {
   startsAt: Date;
   endsAt: Date;
   title: string | null;
+  notes: string | null;
+  location: string | null;
 }): Promise<ActionResult> {
   const {
     data: { user },
@@ -30,6 +32,8 @@ export async function createBusyBlock(args: {
     title: args.title,
     starts_at: args.startsAt.toISOString(),
     ends_at: args.endsAt.toISOString(),
+    notes: args.notes,
+    location: args.location,
   });
 
   if (error) return { error: describeError("Couldn't add activity", error) };
@@ -39,6 +43,7 @@ export async function createBusyBlock(args: {
 export async function createUnavailableDay(args: {
   date: string; // YYYY-MM-DD
   title: string | null;
+  notes: string | null;
 }): Promise<ActionResult> {
   const {
     data: { user },
@@ -49,6 +54,7 @@ export async function createUnavailableDay(args: {
     user_id: user.id,
     date: args.date,
     title: args.title,
+    notes: args.notes,
   });
 
   if (error) {
@@ -65,6 +71,8 @@ export async function updateBusyBlock(args: {
   startsAt: Date;
   endsAt: Date;
   title: string | null;
+  notes: string | null;
+  location: string | null;
 }): Promise<ActionResult> {
   const { error } = await supabase
     .from('busy_blocks')
@@ -72,6 +80,8 @@ export async function updateBusyBlock(args: {
       title: args.title,
       starts_at: args.startsAt.toISOString(),
       ends_at: args.endsAt.toISOString(),
+      notes: args.notes,
+      location: args.location,
     })
     .eq('id', args.id);
 
@@ -83,10 +93,11 @@ export async function updateUnavailableDay(args: {
   userId: string;
   date: string;
   title: string | null;
+  notes: string | null;
 }): Promise<ActionResult> {
   const { error } = await supabase
     .from('unavailable_days')
-    .update({ title: args.title })
+    .update({ title: args.title, notes: args.notes })
     .eq('user_id', args.userId)
     .eq('date', args.date);
 

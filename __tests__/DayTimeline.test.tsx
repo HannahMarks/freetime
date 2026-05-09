@@ -27,6 +27,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 15, 0),
         endsAt: new Date(2026, 4, 13, 17, 0),
         title: 'Yoga',
+        notes: null,
+
+        location: null,
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
@@ -44,6 +47,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 15, 0),
         endsAt: new Date(2026, 4, 13, 17, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
@@ -61,6 +67,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 15, 30),
         endsAt: new Date(2026, 4, 13, 16, 45),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
@@ -76,6 +85,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 15, 0),
         endsAt: new Date(2026, 4, 13, 17, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
@@ -93,6 +105,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 9, 0),
         endsAt: new Date(2026, 4, 13, 10, 0),
         title: 'Standup',
+        notes: null,
+
+        location: null,
       },
       {
         kind: 'busy_block',
@@ -101,6 +116,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 14, 0),
         endsAt: new Date(2026, 4, 13, 15, 0),
         title: 'Coffee',
+        notes: null,
+
+        location: null,
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
@@ -112,7 +130,7 @@ describe('DayTimeline', () => {
 
   it('renders unavailable_days as an above-timeline banner, not as time blocks', () => {
     const items: CalendarItem[] = [
-      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'Wedding' },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'Wedding' , notes: null },
     ];
     render(<DayTimeline date={DAY} items={items} />);
     expect(screen.getByTestId('day-banner-b')).toBeOnTheScreen();
@@ -121,7 +139,7 @@ describe('DayTimeline', () => {
 
   it('uses default banner copy when an unavailable_day has no title', () => {
     const items: CalendarItem[] = [
-      { kind: 'unavailable_day', user: alice, date: '2026-05-13', title: null },
+      { kind: 'unavailable_day', user: alice, date: '2026-05-13', title: null , notes: null },
     ];
     render(<DayTimeline date={DAY} items={items} />);
     expect(screen.getByText(/Alice · Unavailable all day/)).toBeOnTheScreen();
@@ -136,6 +154,9 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 9, 0),
         endsAt: new Date(2026, 4, 13, 10, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     render(<DayTimeline date={DAY} items={items} />);
@@ -151,6 +172,8 @@ describe('DayTimeline', () => {
       startsAt: new Date(2026, 4, 13, 18, 0),
       endsAt: new Date(2026, 4, 15, 9, 0),
       title: 'Hiking',
+      notes: null,
+      location: null,
     };
 
     it('clips a multi-day block to 18:00 → end-of-day on the start day', () => {
@@ -184,6 +207,10 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 22, 0),
         endsAt: new Date(2026, 4, 14, 0, 0),
         title: null,
+
+        notes: null,
+
+        location: null,
       };
       render(<DayTimeline date="2026-05-14" items={[latenight]} />);
       expect(screen.queryByTestId('day-block-late')).toBeNull();
@@ -199,6 +226,10 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 23, 0),
         endsAt: new Date(2026, 4, 14, 1, 0),
         title: null,
+
+        notes: null,
+
+        location: null,
       };
       render(<DayTimeline date="2026-05-13" items={[overnight]} />);
       expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 1104, height: 48 });
@@ -214,6 +245,10 @@ describe('DayTimeline', () => {
         startsAt: new Date(2026, 4, 13, 23, 0),
         endsAt: new Date(2026, 4, 14, 1, 0),
         title: null,
+
+        notes: null,
+
+        location: null,
       };
       render(<DayTimeline date="2026-05-14" items={[overnight]} />);
       expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 0, height: 48 });

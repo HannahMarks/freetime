@@ -13,6 +13,8 @@ type BusyBlockRow = {
   title: string | null;
   starts_at: string;
   ends_at: string;
+  notes: string | null;
+  location: string | null;
   user: ProfileRow | null;
 };
 
@@ -20,11 +22,14 @@ type UnavailableDayRow = {
   user_id: string;
   date: string;
   title: string | null;
+  notes: string | null;
   user: ProfileRow | null;
 };
 
-const BUSY_SELECT = 'id, user_id, title, starts_at, ends_at, user:profiles(id, display_name, color)';
-const UNAVAIL_SELECT = 'user_id, date, title, user:profiles(id, display_name, color)';
+const BUSY_SELECT =
+  'id, user_id, title, starts_at, ends_at, notes, location, user:profiles(id, display_name, color)';
+const UNAVAIL_SELECT =
+  'user_id, date, title, notes, user:profiles(id, display_name, color)';
 
 function describeError(err: unknown): string {
   if (process.env.NODE_ENV !== 'production') {
@@ -83,6 +88,8 @@ export async function listCalendarItems(args: {
       startsAt: new Date(row.starts_at),
       endsAt: new Date(row.ends_at),
       title: row.title,
+      notes: row.notes,
+      location: row.location,
     });
   }
 
@@ -93,6 +100,7 @@ export async function listCalendarItems(args: {
       user: row.user,
       date: row.date,
       title: row.title,
+      notes: row.notes,
     });
   }
 

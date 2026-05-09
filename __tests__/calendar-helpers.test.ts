@@ -152,8 +152,11 @@ describe('computeMarkings', () => {
         startsAt: new Date(2026, 4, 13, 9, 0),
         endsAt: new Date(2026, 4, 13, 10, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
-      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: null },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: null , notes: null },
     ];
     const out = computeMarkings(items);
     expect(out['2026-05-13'].dots).toEqual([
@@ -171,6 +174,9 @@ describe('computeMarkings', () => {
         startsAt: new Date(2026, 4, 13, 9, 0),
         endsAt: new Date(2026, 4, 13, 10, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
       {
         kind: 'busy_block',
@@ -179,6 +185,9 @@ describe('computeMarkings', () => {
         startsAt: new Date(2026, 4, 13, 14, 0),
         endsAt: new Date(2026, 4, 13, 15, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     const out = computeMarkings(items);
@@ -199,6 +208,9 @@ describe('computeMarkings', () => {
         startsAt: new Date(2026, 4, 13, 18, 0),
         endsAt: new Date(2026, 4, 15, 9, 0),
         title: 'Hiking trip',
+        notes: null,
+
+        location: null,
       },
     ];
     const out = computeMarkings(items);
@@ -216,6 +228,9 @@ describe('computeMarkings', () => {
         startsAt: new Date(2026, 4, 13, 22, 0),
         endsAt: new Date(2026, 4, 14, 0, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     const out = computeMarkings(items);
@@ -234,6 +249,9 @@ describe('itemsOnDate', () => {
         startsAt: new Date(2026, 4, 13, 12, 0),
         endsAt: new Date(2026, 4, 13, 13, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
       {
         kind: 'busy_block',
@@ -242,6 +260,9 @@ describe('itemsOnDate', () => {
         startsAt: new Date(2026, 4, 14, 12, 0),
         endsAt: new Date(2026, 4, 14, 13, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     const out = itemsOnDate(items, '2026-05-13');
@@ -251,8 +272,8 @@ describe('itemsOnDate', () => {
 
   it('returns unavailable_day rows that match the date', () => {
     const items: CalendarItem[] = [
-      { kind: 'unavailable_day', user: alice, date: '2026-05-13', title: 'PTO' },
-      { kind: 'unavailable_day', user: bob, date: '2026-05-14', title: null },
+      { kind: 'unavailable_day', user: alice, date: '2026-05-13', title: 'PTO' , notes: null },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-14', title: null , notes: null },
     ];
     expect(itemsOnDate(items, '2026-05-13')).toHaveLength(1);
   });
@@ -266,6 +287,9 @@ describe('itemsOnDate', () => {
         startsAt: new Date(2026, 4, 13, 18, 0),
         endsAt: new Date(2026, 4, 15, 9, 0),
         title: 'Hiking',
+        notes: null,
+
+        location: null,
       },
     ];
     expect(itemsOnDate(items, '2026-05-12')).toHaveLength(0);
@@ -284,6 +308,9 @@ describe('itemsOnDate', () => {
         startsAt: new Date(2026, 4, 13, 22, 0),
         endsAt: new Date(2026, 4, 14, 0, 0),
         title: null,
+        notes: null,
+
+        location: null,
       },
     ];
     expect(itemsOnDate(items, '2026-05-13')).toHaveLength(1);
@@ -304,8 +331,11 @@ describe('buildAgenda', () => {
         startsAt: new Date(2026, 4, 13, 12, 0),
         endsAt: new Date(2026, 4, 13, 13, 0),
         title: 'Lunch',
+        notes: null,
+
+        location: null,
       },
-      { kind: 'unavailable_day', user: bob, date: '2026-05-15', title: 'Wedding' },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-15', title: 'Wedding' , notes: null },
     ];
     const agenda = buildAgenda(items, dateKeys, today);
     expect(agenda).toHaveLength(3);
@@ -318,7 +348,7 @@ describe('buildAgenda', () => {
 
   it('drops items outside the requested date window', () => {
     const items: CalendarItem[] = [
-      { kind: 'unavailable_day', user: alice, date: '2026-12-25', title: null },
+      { kind: 'unavailable_day', user: alice, date: '2026-12-25', title: null , notes: null },
     ];
     const agenda = buildAgenda(items, dateKeys, today);
     expect(agenda.flatMap((a) => a.items)).toHaveLength(0);
@@ -333,8 +363,11 @@ describe('buildAgenda', () => {
         startsAt: new Date(2026, 4, 13, 9, 0),
         endsAt: new Date(2026, 4, 13, 10, 0),
         title: 'Standup',
+        notes: null,
+
+        location: null,
       },
-      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'PTO' },
+      { kind: 'unavailable_day', user: bob, date: '2026-05-13', title: 'PTO' , notes: null },
     ];
     const agenda = buildAgenda(items, dateKeys, today);
     expect(agenda[0].items[0].kind).toBe('unavailable_day');
@@ -350,6 +383,9 @@ describe('buildAgenda', () => {
         startsAt: new Date(2026, 4, 13, 16, 0),
         endsAt: new Date(2026, 4, 13, 17, 0),
         title: 'Late',
+        notes: null,
+
+        location: null,
       },
       {
         kind: 'busy_block',
@@ -358,6 +394,9 @@ describe('buildAgenda', () => {
         startsAt: new Date(2026, 4, 13, 9, 0),
         endsAt: new Date(2026, 4, 13, 10, 0),
         title: 'Early',
+        notes: null,
+
+        location: null,
       },
     ];
     const agenda = buildAgenda(items, dateKeys, today);
