@@ -77,8 +77,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     includeFontPadding: false,
-    // Wider chevron — gives the open arrow more presence next to
-    // the larger month label.
-    transform: [{ scaleX: 1.4 }],
+    // Stretch the open arrow horizontally so it has presence next to
+    // the larger month label and reads clearly as a wide chevron
+    // rather than a thin angle bracket.
+    transform: [{ scaleX: 2 }],
   },
 });
