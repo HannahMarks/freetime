@@ -11,14 +11,15 @@ import Animated, {
 import { shiftDate } from '../lib/calendar-helpers';
 import { WeekStrip } from './WeekStrip';
 
-// Slightly longer than 180ms ("almost there but smoother") with the
-// same gentle inOut(cubic) curve. Pre-rendered next-pane content
-// means there's no actual layout flicker — what felt like "catch-up"
-// in the past was the slide duration itself, so 240 is a comfortable
-// landing.
-const SLIDE_DURATION_MS = 240;
-const SPRING_BACK_DURATION_MS = 180;
-const SLIDE_EASING = Easing.inOut(Easing.cubic);
+// Longer + smoother. The neighbouring week's text is already pre-rendered
+// in the side panes, so the only smoothness lever is duration / curve.
+// Easing.out(cubic) starts fast (matching release momentum) and
+// decelerates into the landing — much more "natural" than inOut, which
+// felt like the strip paused before settling. 320ms gives the user time
+// to read the new dates as they slide in without dragging.
+const SLIDE_DURATION_MS = 320;
+const SPRING_BACK_DURATION_MS = 220;
+const SLIDE_EASING = Easing.out(Easing.cubic);
 /** Hard-coded height of a single WeekStrip — chosen to match the
  * intrinsic height of WeekStrip's content (label + 30px bubble +
  * vertical padding). Matters because the panes are absolute-positioned
@@ -130,7 +131,9 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
       translateX.value = e.translationX;
     })
     .onEnd((e) => {
-      const threshold = screenWidth / 4;
+      // Lower commit threshold (~17%): a relaxed flick now changes
+      // weeks instead of needing a full quarter-screen drag.
+      const threshold = screenWidth / 6;
       if (e.translationX < -threshold) {
         translateX.value = withTiming(
           -screenWidth,

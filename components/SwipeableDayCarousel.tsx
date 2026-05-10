@@ -16,13 +16,17 @@ import {
 } from '../lib/calendar-helpers';
 import { DayTimeline } from './DayTimeline';
 
-// Long + gentle. The user kept perceiving 240ms as "really snappy",
-// so leaning into a more cinematic feel — Easing.inOut(cubic) with
-// a noticeably longer duration. 360ms is the upper end of "doesn't
-// feel slow", and the gentle start/end avoids any punchy snap.
-const SLIDE_DURATION_MS = 360;
-const SPRING_BACK_DURATION_MS = 240;
-const SLIDE_EASING = Easing.inOut(Easing.cubic);
+// Smoother + longer. User reported the swipe felt "really difficult to
+// use" — usually means the gesture isn't activating reliably (see
+// activeOffsetX / failOffsetY tuning below) — and "should be a lot
+// smoother", which we read as the animation curve. Easing.out(cubic)
+// starts fast (matching the user's release momentum) and decelerates
+// into the landing — feels natural rather than the sit-then-slide
+// quality of inOut. 420ms is on the long side but with a fast-start
+// curve it doesn't read as slow.
+const SLIDE_DURATION_MS = 420;
+const SPRING_BACK_DURATION_MS = 260;
+const SLIDE_EASING = Easing.out(Easing.cubic);
 
 type Props = {
   /** YYYY-MM-DD of the day currently centered. */
@@ -85,17 +89,23 @@ export function SwipeableDayCarousel({
   }
 
   const pan = Gesture.Pan()
-    .activeOffsetX([-10, 10])
-    // Widened from [-15, 15] so the horizontal swipe isn't aborted by
-    // the small vertical jitter that's natural when dragging a finger
-    // across a phone screen — was making day-changes very hard to
-    // trigger in practice.
-    .failOffsetY([-30, 30])
+    // 6px horizontal activation so the swipe catches even when the
+    // finger barely moves; previous 10px was being out-raced by the
+    // vertical scroll's fight for the same touch.
+    .activeOffsetX([-6, 6])
+    // 60px vertical fail threshold (was 30): real human swipes have a
+    // lot of vertical drift, and at 30 the gesture was failing to
+    // ScrollView mid-drag, which is what "really difficult to use"
+    // ended up describing in practice.
+    .failOffsetY([-60, 60])
     .onUpdate((e) => {
       translateX.value = e.translationX;
     })
     .onEnd((e) => {
-      const threshold = screenWidth / 4;
+      // Lower commit threshold (~17% of screen) — combined with looser
+      // activation, the user can change days with a relaxed flick
+      // rather than needing a full quarter-screen committed swipe.
+      const threshold = screenWidth / 6;
       if (e.translationX < -threshold) {
         translateX.value = withTiming(
           -screenWidth,
