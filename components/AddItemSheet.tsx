@@ -46,10 +46,11 @@ const ENTER_DURATION_MS = 280;
 const EXIT_DURATION_MS = 220;
 /** Faded color for placeholder text + the "(optional)" hint inside inputs. */
 const PLACEHOLDER_COLOR = '#b5b5b5';
-/** Initial scale for the entry zoom-in. Smaller = more dramatic bloom on
- * open. 0.7 reads as a clear "popping into existence" effect, paired with
- * a bouncy spring landing. */
-const ENTRY_SCALE_FROM = 0.7;
+/** Initial scale for the entry animation. The user's request shifted from
+ * "more zoom" → "more slide-up than zoom", so this is now subtle (0.96):
+ * the slide is the dominant motion, and the small scale-up just gives the
+ * sheet a hint of forward depth as it lands. */
+const ENTRY_SCALE_FROM = 0.96;
 
 type Kind = 'busy' | 'unavailable';
 
@@ -491,15 +492,16 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                     pressed && styles.headerIconButtonPressed,
                   ]}
                 >
-                  {/* Pencil glyph U+270F with VS-15 (text-presentation
-                      selector U+FE0E) — forces the system to render it
-                      as a black/text glyph instead of the colorful emoji
-                      it would default to with VS-16. Combined with
-                      `color: '#111'` on the Text, this matches the
-                      monochrome ⋯ icon and the rest of the sheet. */}
-                  <Text style={styles.pencilEmoji} accessibilityElementsHidden>
-                    {'✏︎'}
-                  </Text>
+                  {/* Manual-drawn pencil icon — simple line-drawing
+                      style (rectangular body + triangular tip), rotated
+                      -45° so it reads as a tilted pencil. The text-glyph
+                      (U+270F) version was inconsistent across platforms
+                      — sometimes too thin, sometimes the wrong shape.
+                      This composite always renders identically. */}
+                  <View style={styles.pencilIcon}>
+                    <View style={styles.pencilBody} />
+                    <View style={styles.pencilTip} />
+                  </View>
                 </Pressable>
               ) : null}
               <Pressable
@@ -737,11 +739,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    // Now that the sheet is full-screen and SafeAreaView only insets the
-    // status-bar area, the close button and heading were sitting right
-    // at the top of the safe area — felt cramped against the notch /
-    // status text. Extra top padding pushes them visibly down.
-    paddingTop: 28,
+    // Big top padding (52) so the X / pencil / ⋯ row sits well below
+    // the SafeAreaView's status-bar inset. 28 left them feeling cramped
+    // against the notch on phones with bigger safe areas; 52 reads as
+    // a deliberate gap between the system chrome and the sheet chrome.
+    paddingTop: 52,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#eee',
@@ -771,14 +773,38 @@ const styles = StyleSheet.create({
   },
   headerIconButtonPressed: { backgroundColor: '#f0f0f0' },
   moreIcon: { fontSize: 22, lineHeight: 24, color: '#111', fontWeight: '700' },
-  pencilEmoji: {
-    fontSize: 18,
-    lineHeight: 22,
-    textAlign: 'center',
-    // Explicit dark color: combined with the U+FE0E text-presentation
-    // selector on the glyph, this keeps the pencil monochrome instead
-    // of falling back to the colorful emoji presentation.
-    color: '#111',
+  // 22×22 composite pencil icon: a thin diagonal rectangle (body) + a
+  // small downward triangle (tip), wrapped in a -45°-rotated container
+  // so the whole thing reads as a tilted pencil. Bigger and crisper
+  // than the previous Unicode-glyph approach, monochrome by design.
+  pencilIcon: {
+    width: 22,
+    height: 22,
+    transform: [{ rotate: '-45deg' }],
+  },
+  pencilBody: {
+    position: 'absolute',
+    width: 5,
+    height: 14,
+    top: 2,
+    left: 8.5, // (22 − 5) / 2 — centered horizontally in the icon box
+    backgroundColor: '#111',
+  },
+  pencilTip: {
+    position: 'absolute',
+    top: 16,
+    left: 8.5,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 2.5,
+    borderLeftColor: 'transparent',
+    borderRightWidth: 2.5,
+    borderRightColor: 'transparent',
+    // Top border becomes the visible triangle face; the transparent
+    // L/R borders give it sloped sides that taper to a point at the
+    // bottom — the classic CSS-triangle border trick.
+    borderTopWidth: 4,
+    borderTopColor: '#111',
   },
   body: {
     paddingHorizontal: 20,

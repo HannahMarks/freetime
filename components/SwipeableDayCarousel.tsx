@@ -16,13 +16,18 @@ import {
 } from '../lib/calendar-helpers';
 import { DayTimeline } from './DayTimeline';
 
-// Match the week-strip carousel's feel exactly: 320ms with Easing.out(cubic).
-// User reported the day swipe's previous longer/different curve felt
-// "really difficult to use" while the week swipe felt good — so we just
-// adopt the week swipe's timing wholesale.
-const SLIDE_DURATION_MS = 320;
-const SPRING_BACK_DURATION_MS = 220;
-const SLIDE_EASING = Easing.out(Easing.cubic);
+// Longer + gentler than week strip. User reported "still too snappy"
+// even after matching the week's 320ms / Easing.out(cubic) — likely
+// because day-swipe content is a full-screen pane and reads as
+// "more substance moving" than the week strip's narrow bar. Bumped to
+// 420ms with Easing.inOut(cubic) (gentle start AND gentle end) — the
+// inOut curve has no fast-start punch, which is what "snappy" was
+// referring to. This intentionally feels different from the week
+// swipe's faster Easing.out feel: each carousel's pacing matches the
+// visual weight of what it's moving.
+const SLIDE_DURATION_MS = 420;
+const SPRING_BACK_DURATION_MS = 260;
+const SLIDE_EASING = Easing.inOut(Easing.cubic);
 
 type Props = {
   /** YYYY-MM-DD of the day currently centered. */
@@ -59,12 +64,14 @@ type Props = {
  * carousel re-centered on the new "curr" pane in a single paint.
  *
  * Pan is direction-gated:
- * - `activeOffsetX([-6, 6])` so a relaxed flick activates without needing
- *   to overcome a heavy threshold (was 10; bumped down because real
- *   horizontal drags often have small drift).
+ * - `activeOffsetX([-12, 12])` so the gesture activates with a
+ *   deliberate drag rather than the moment a finger twitches. The
+ *   previous 6px threshold made the swipe feel "snappy" / over-eager.
+ *   12 is a middle ground between the original 10 and the week strip's
+ *   15.
  * - `failOffsetY([-60, 60])` so the gesture survives natural vertical
- *   jitter in horizontal swipes (was 30; that was killing the gesture
- *   mid-drag for many users — the "really difficult to use" symptom).
+ *   jitter in horizontal swipes — this was the "really difficult to
+ *   use" fix from the previous round and stays.
  */
 export function SwipeableDayCarousel({
   date,
@@ -114,7 +121,7 @@ export function SwipeableDayCarousel({
   }
 
   const pan = Gesture.Pan()
-    .activeOffsetX([-6, 6])
+    .activeOffsetX([-12, 12])
     .failOffsetY([-60, 60])
     .onUpdate((e) => {
       translateX.value = e.translationX;
