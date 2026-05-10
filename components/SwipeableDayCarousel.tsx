@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, useLayoutEffect, useState } from 'react';
 import { RefreshControlProps, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -16,16 +16,12 @@ import {
 } from '../lib/calendar-helpers';
 import { DayTimeline } from './DayTimeline';
 
-// Smoother + longer. User reported the swipe felt "really difficult to
-// use" — usually means the gesture isn't activating reliably (see
-// activeOffsetX / failOffsetY tuning below) — and "should be a lot
-// smoother", which we read as the animation curve. Easing.out(cubic)
-// starts fast (matching the user's release momentum) and decelerates
-// into the landing — feels natural rather than the sit-then-slide
-// quality of inOut. 420ms is on the long side but with a fast-start
-// curve it doesn't read as slow.
-const SLIDE_DURATION_MS = 420;
-const SPRING_BACK_DURATION_MS = 260;
+// Match the week-strip carousel's feel exactly: 320ms with Easing.out(cubic).
+// User reported the day swipe's previous longer/different curve felt
+// "really difficult to use" while the week swipe felt good — so we just
+// adopt the week swipe's timing wholesale.
+const SLIDE_DURATION_MS = 320;
+const SPRING_BACK_DURATION_MS = 220;
 const SLIDE_EASING = Easing.out(Easing.cubic);
 
 type Props = {
@@ -34,8 +30,12 @@ type Props = {
   /** Full month's calendar items. The carousel slices per-day for each pane. */
   items: CalendarItem[];
   currentUserId?: string;
-  /** Fires after a swipe-release past threshold. The parent should set
-   * its `selectedDate` to this value. */
+  /** Fires the moment a swipe-release commits past threshold — BEFORE the
+   * slide animation finishes — so the parent's selectedDate (and the
+   * week-strip highlight that depends on it) updates promptly. The
+   * carousel's internal layoutDate state insulates the pane positioning
+   * from that immediate prop change so the slide-out animation still
+   * plays cleanly to completion. */
   onDateChange: (newDate: string) => void;
   onItemPress?: (item: CalendarItem) => void;
   onItemReschedule?: (item: BusyBlockItem, newStart: Date, newEnd: Date) => void;
@@ -45,21 +45,26 @@ type Props = {
 
 /**
  * Three DayTimelines side-by-side (prev / curr / next), with a horizontal
- * Pan gesture that translates them all together. Past `screenWidth / 4` on
+ * Pan gesture that translates them all together. Past `screenWidth / 6` on
  * release, animates the slide and fires `onDateChange` with the new
  * centered date.
  *
- * Pan is direction-gated:
- * - `activeOffsetX([-10, 10])` so small movements don't activate.
- * - `failOffsetY([-15, 15])` so vertical drags fail and let the inner
- *   ScrollView's vertical scroll + the BusyBlockOverlay's long-press pan
- *   take over.
+ * Architecture mirrors SwipeableWeekStrip: an internal `layoutDate` state
+ * drives the prev/curr/next pane content, decoupled from the parent's
+ * `date` prop. This lets the carousel call `onDateChange` IMMEDIATELY
+ * when the user crosses the commit threshold (so the week-strip highlight
+ * updates without waiting) while the slide-off animation continues to
+ * play. When the animation finishes, layoutDate updates, which combined
+ * with a synchronous translateX reset in `useLayoutEffect` leaves the
+ * carousel re-centered on the new "curr" pane in a single paint.
  *
- * After commit, `translateX` resets to 0 in the `runOnJS` callback. The
- * subsequent re-render with the new `date` prop recomputes the three
- * panes' contents — the visual position of the new "curr" pane (at
- * left=0, translateX=0) matches where the old pane just slid to, so
- * there's no flicker.
+ * Pan is direction-gated:
+ * - `activeOffsetX([-6, 6])` so a relaxed flick activates without needing
+ *   to overcome a heavy threshold (was 10; bumped down because real
+ *   horizontal drags often have small drift).
+ * - `failOffsetY([-60, 60])` so the gesture survives natural vertical
+ *   jitter in horizontal swipes (was 30; that was killing the gesture
+ *   mid-drag for many users — the "really difficult to use" symptom).
  */
 export function SwipeableDayCarousel({
   date,
@@ -73,53 +78,69 @@ export function SwipeableDayCarousel({
   const { width: screenWidth } = useWindowDimensions();
   const translateX = useSharedValue(0);
 
-  const prevDate = shiftDate(date, -1);
-  const nextDate = shiftDate(date, 1);
+  // Internal layout date — drives the prev/curr/next pane dates. Stays
+  // independent of the `date` prop while a slide-off animation is in
+  // progress (so we can fire onDateChange immediately for the highlight
+  // update without re-rendering the panes mid-animation).
+  const [layoutDate, setLayoutDate] = useState(date);
+
+  // Re-sync layoutDate with the prop AND reset translateX in a
+  // useLayoutEffect (synchronous after React commit, before paint) so
+  // the same paint that shows the new layout has translateX=0 — no
+  // visual jolt when the parent flips `date` from outside the carousel
+  // (e.g. user picks a date in the month grid).
+  useLayoutEffect(() => {
+    if (layoutDate !== date) {
+      setLayoutDate(date);
+    }
+    translateX.value = 0;
+  }, [date, layoutDate, translateX]);
+
+  // Compute neighbours from layoutDate (NOT date). The gesture's worklet
+  // captures these at gesture-creation time; tying them to layoutDate
+  // (which only updates on commit) ensures the closure can't go stale
+  // mid-swipe even if the parent re-renders for an unrelated reason.
+  const prevDate = shiftDate(layoutDate, -1);
+  const nextDate = shiftDate(layoutDate, 1);
   const prevItems = itemsOnDate(items, prevDate);
-  const currItems = itemsOnDate(items, date);
+  const currItems = itemsOnDate(items, layoutDate);
   const nextItems = itemsOnDate(items, nextDate);
 
-  function commit(newDate: string) {
-    // Setting React state triggers re-render. We rely on the outer
-    // `key={date}` re-mount to give us a fresh translateX of 0 with the
-    // new "curr" pane already centered — avoids the one-frame race where
-    // the old translateX of -screenWidth would briefly show the wrong
-    // pane under the new layout.
-    onDateChange(newDate);
+  function commitLayout(newDate: string) {
+    setLayoutDate(newDate);
+    // No need to reset translateX here — the useLayoutEffect above
+    // catches `date !== layoutDate` (one of them just changed) and
+    // resets it synchronously before paint.
   }
 
   const pan = Gesture.Pan()
-    // 6px horizontal activation so the swipe catches even when the
-    // finger barely moves; previous 10px was being out-raced by the
-    // vertical scroll's fight for the same touch.
     .activeOffsetX([-6, 6])
-    // 60px vertical fail threshold (was 30): real human swipes have a
-    // lot of vertical drift, and at 30 the gesture was failing to
-    // ScrollView mid-drag, which is what "really difficult to use"
-    // ended up describing in practice.
     .failOffsetY([-60, 60])
     .onUpdate((e) => {
       translateX.value = e.translationX;
     })
     .onEnd((e) => {
-      // Lower commit threshold (~17% of screen) — combined with looser
-      // activation, the user can change days with a relaxed flick
-      // rather than needing a full quarter-screen committed swipe.
       const threshold = screenWidth / 6;
       if (e.translationX < -threshold) {
+        // Tell the parent NOW so the week-strip highlight bumps to the
+        // next day before the slide finishes — this is what fixes the
+        // user's "waits too long to switch the highlighted day"
+        // complaint.
+        runOnJS(onDateChange)(nextDate);
         translateX.value = withTiming(
           -screenWidth,
           { duration: SLIDE_DURATION_MS, easing: SLIDE_EASING },
           (finished) => {
-            if (finished) runOnJS(commit)(nextDate);
+            if (finished) runOnJS(commitLayout)(nextDate);
           },
         );
       } else if (e.translationX > threshold) {
+        runOnJS(onDateChange)(prevDate);
         translateX.value = withTiming(
           screenWidth,
           { duration: SLIDE_DURATION_MS, easing: SLIDE_EASING },
           (finished) => {
-            if (finished) runOnJS(commit)(prevDate);
+            if (finished) runOnJS(commitLayout)(prevDate);
           },
         );
       } else {
@@ -135,13 +156,7 @@ export function SwipeableDayCarousel({
   }));
 
   return (
-    // Key on `date` so a successful swipe-commit cleanly re-mounts with
-    // a fresh translateX of 0 and the new curr/prev/next layout. The old
-    // viewport (translateX = -screenWidth showing the new date in its
-    // "next" pane) and the new viewport (translateX = 0 showing the new
-    // date in its "curr" pane) put the same date at screen center, so
-    // the swap is visually seamless.
-    <View key={date} style={styles.viewport}>
+    <View style={styles.viewport}>
       <GestureDetector gesture={pan}>
         <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]} collapsable={false}>
           <View style={[styles.pane, { left: -screenWidth, width: screenWidth }]}>
@@ -158,7 +173,7 @@ export function SwipeableDayCarousel({
             style={[styles.pane, { left: 0, width: screenWidth }]}
           >
             <DayTimeline
-              date={date}
+              date={layoutDate}
               items={currItems}
               currentUserId={currentUserId}
               onItemPress={onItemPress}

@@ -192,6 +192,10 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
   const offsetY = useSharedValue(0);
   const isDragging = useSharedValue(0);
   const lastSnap = useSharedValue(0);
+  // Press feedback as a Reanimated value so it composes with the
+  // dragging transform (a CSS-side `transform` from a Pressable
+  // pressed-style would be CLOBBERED by the animated transform array).
+  const pressed = useSharedValue(0);
 
   // Live time-range that follows the snap as the user drags. `null` when
   // not actively dragging — falls back to the block's stored start/end.
@@ -261,7 +265,14 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
       : formatTimeRange(block.startsAt, block.endsAt);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: offsetY.value }, { scale: 1 + isDragging.value * 0.02 }],
+    transform: [
+      { translateY: offsetY.value },
+      // Drag growth + press shrink combined into a single scale factor.
+      // Press scale-down (4%) is plenty visible; combined with the
+      // opacity drop below it makes the press feedback obvious.
+      { scale: (1 + isDragging.value * 0.02) * (1 - pressed.value * 0.04) },
+    ],
+    opacity: 1 - pressed.value * 0.4,
     shadowOpacity: 0.15 * isDragging.value,
     shadowRadius: 8 * isDragging.value,
     zIndex: isDragging.value > 0 ? 10 : 0,
@@ -275,6 +286,12 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
         testID={`day-block-${block.id}`}
         collapsable={false}
         onPress={onPress ? () => onPress(block) : undefined}
+        onPressIn={() => {
+          pressed.value = withTiming(1, { duration: 80 });
+        }}
+        onPressOut={() => {
+          pressed.value = withTiming(0, { duration: 140 });
+        }}
         style={[
           styles.block,
           {
@@ -312,7 +329,10 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   bannerTitle: { fontSize: 14, color: '#111' },
-  bannerItemPressed: { opacity: 0.6 },
+  // Stronger press feedback than the previous opacity:0.6 — combines a
+  // bigger opacity drop with a tiny scale-down so the tap clearly
+  // "responds" before the sheet opens.
+  bannerItemPressed: { opacity: 0.5, transform: [{ scale: 0.98 }] },
   timeline: { flex: 1 },
   hourRow: {
     position: 'absolute',

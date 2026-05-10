@@ -251,6 +251,9 @@ export default function CalendarScreen() {
         <MonthToggleChevron
           expanded={monthVisible}
           onPress={() => setMonthVisible((v) => !v)}
+          // Match the month label's color so the V reads as part of the
+          // same heading rather than a contrasting accent glyph.
+          color="#111"
         />
       </Pressable>
 
