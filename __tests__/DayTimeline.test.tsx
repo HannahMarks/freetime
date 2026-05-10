@@ -8,9 +8,10 @@ const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
 const DAY = '2026-05-13';
 
 describe('DayTimeline', () => {
-  it('renders all 24 hour labels', () => {
+  it('renders 23 hour labels (skips the 12 AM at the very top)', () => {
     render(<DayTimeline date={DAY} items={[]} />);
-    expect(screen.getByText('12 AM')).toBeOnTheScreen();
+    // 12 AM is intentionally suppressed — see comment in DayTimeline.
+    expect(screen.queryByText('12 AM')).toBeNull();
     expect(screen.getByText('1 AM')).toBeOnTheScreen();
     expect(screen.getByText('11 AM')).toBeOnTheScreen();
     expect(screen.getByText('12 PM')).toBeOnTheScreen();

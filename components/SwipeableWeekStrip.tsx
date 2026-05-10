@@ -11,8 +11,8 @@ import Animated, {
 import { shiftDate } from '../lib/calendar-helpers';
 import { WeekStrip } from './WeekStrip';
 
-const SLIDE_DURATION_MS = 220;
-const SPRING_BACK_DURATION_MS = 160;
+const SLIDE_DURATION_MS = 140;
+const SPRING_BACK_DURATION_MS = 120;
 const SLIDE_EASING = Easing.out(Easing.exp);
 /** Hard-coded height of a single WeekStrip — chosen to match the
  * intrinsic height of WeekStrip's content (label + 30px bubble +

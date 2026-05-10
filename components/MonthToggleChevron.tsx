@@ -77,9 +77,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     includeFontPadding: false,
-    // Stretch the open arrow horizontally so it has presence next to
-    // the larger month label and reads clearly as a wide chevron
-    // rather than a thin angle bracket.
-    transform: [{ scaleX: 2 }],
+    // - scaleX(3) stretches the open arrow horizontally so the chevron
+    //   reads as a wide-and-flat shape, not a thin angle bracket.
+    // - translateY(-3) nudges the glyph up to compensate for the
+    //   `⌄` glyph sitting noticeably below its line-box's optical
+    //   center, putting its visual midpoint aligned with the text.
+    transform: [{ scaleX: 3 }, { translateY: -3 }],
   },
 });
