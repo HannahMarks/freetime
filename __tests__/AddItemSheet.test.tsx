@@ -85,6 +85,12 @@ function datePickersByTestID() {
   return map;
 }
 
+/** Shared helper: open the sheet on an existing item (view mode), then tap
+ * the pencil to enter edit mode. Used by every edit-mode test below. */
+function enterEditMode() {
+  fireEvent.press(screen.getByTestId('event-edit'));
+}
+
 describe('AddItemSheet', () => {
   it("doesn't render anything when visible is false", () => {
     render(<AddItemSheet {...baseProps} visible={false} />);
@@ -326,7 +332,7 @@ describe('AddItemSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  describe('edit mode', () => {
+  describe('view + edit mode', () => {
     const editingBusy: CalendarItem = {
       kind: 'busy_block',
       id: 'bb1',
@@ -345,261 +351,358 @@ describe('AddItemSheet', () => {
       notes: 'Hawaii through Sunday',
     };
 
-    it("renders 'Edit' as the heading and hides the kind toggle", () => {
-      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      expect(screen.getByText('Edit')).toBeOnTheScreen();
-      expect(screen.queryByTestId('kind-busy')).toBeNull();
-      expect(screen.queryByTestId('kind-unavailable')).toBeNull();
+    describe('view mode (default when opened on an existing item)', () => {
+      it('shows the event title as the heading', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        expect(screen.getByText('Yoga')).toBeOnTheScreen();
+        // Not the Edit heading.
+        expect(screen.queryByText('Edit')).toBeNull();
+      });
+
+      it('falls back to "Busy time" / "Unavailable day" when the item has no title', () => {
+        const untitledBusy: CalendarItem = { ...editingBusy, title: null };
+        const untitledDay: CalendarItem = { ...editingDay, title: null };
+        const { rerender } = render(<AddItemSheet {...baseProps} editing={untitledBusy} />);
+        expect(screen.getByText('Busy time')).toBeOnTheScreen();
+        rerender(<AddItemSheet {...baseProps} editing={untitledDay} />);
+        expect(screen.getByText('Unavailable day')).toBeOnTheScreen();
+      });
+
+      it('renders the date, time range, location, and notes as read-only text', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        // Date is locale-formatted; just check the year is present.
+        expect(screen.getByTestId('view-date').props.children).toMatch(/2026/);
+        expect(screen.getByTestId('view-time').props.children).toMatch(/14|2:00/i);
+        expect(screen.getByTestId('view-location').props.children).toBe('Studio 5');
+        expect(screen.getByTestId('view-notes').props.children).toBe('Hot vinyasa');
+      });
+
+      it('shows "All day" instead of a time range for an unavailable_day', () => {
+        render(<AddItemSheet {...baseProps} editing={editingDay} />);
+        expect(screen.getByTestId('view-time').props.children).toBe('All day');
+        expect(screen.getByTestId('view-notes').props.children).toBe('Hawaii through Sunday');
+      });
+
+      it('omits the location row when there is no location', () => {
+        const noLoc: CalendarItem = { ...editingBusy, location: null };
+        render(<AddItemSheet {...baseProps} editing={noLoc} />);
+        expect(screen.queryByTestId('view-location')).toBeNull();
+      });
+
+      it('omits the notes row when there are no notes', () => {
+        const noNotes: CalendarItem = { ...editingBusy, notes: null };
+        render(<AddItemSheet {...baseProps} editing={noNotes} />);
+        expect(screen.queryByTestId('view-notes')).toBeNull();
+      });
+
+      it('does not render the Save button (view mode is read-only)', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        expect(screen.queryByLabelText('Save')).toBeNull();
+      });
+
+      it('does not render the form inputs (no pickers, no TextInputs)', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        expect(pickersByTestID()['time-picker-start']).toBeUndefined();
+        expect(screen.queryByTestId('input-location')).toBeNull();
+        expect(screen.queryByTestId('input-notes')).toBeNull();
+      });
+
+      it('renders the pencil edit button', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        expect(screen.getByTestId('event-edit')).toBeOnTheScreen();
+      });
+
+      it('does NOT render the pencil button in create mode', () => {
+        render(<AddItemSheet {...baseProps} />);
+        expect(screen.queryByTestId('event-edit')).toBeNull();
+      });
     });
 
-    it('pre-fills the title and time pickers from the busy_block being edited', () => {
-      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      expect(screen.getByDisplayValue('Yoga')).toBeOnTheScreen();
-      const pickers = pickersByTestID();
-      expect(pickers['time-picker-start']?.value?.getHours()).toBe(14);
-      expect(pickers['time-picker-end']?.value?.getMinutes()).toBe(30);
-    });
+    describe('pencil → edit mode', () => {
+      it('switches to the edit form when the pencil is tapped', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        // Initially: pencil shown, no Save button.
+        expect(screen.getByTestId('event-edit')).toBeOnTheScreen();
+        expect(screen.queryByLabelText('Save')).toBeNull();
 
-    it('pre-fills both date pickers from a multi-day busy_block being edited', () => {
-      const editingTrip: CalendarItem = {
-        kind: 'busy_block',
-        id: 'trip',
-        user: me,
-        startsAt: new Date(2026, 4, 13, 18, 0),
-        endsAt: new Date(2026, 4, 15, 9, 0),
-        title: 'Hiking',
-        notes: null,
-        location: null,
-      };
-      render(<AddItemSheet {...baseProps} editing={editingTrip} />);
-      const dates = datePickersByTestID();
-      expect(dates['date-picker-start']?.value?.getDate()).toBe(13);
-      expect(dates['date-picker-end']?.value?.getDate()).toBe(15);
-    });
+        enterEditMode();
 
-    it('pre-fills location and notes from the busy_block being edited', () => {
-      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      expect(screen.getByDisplayValue('Hot vinyasa')).toBeOnTheScreen();
-      expect(screen.getByDisplayValue('Studio 5')).toBeOnTheScreen();
-    });
+        // Now: Edit heading + Save button visible.
+        expect(screen.getByText('Edit')).toBeOnTheScreen();
+        expect(screen.getByLabelText('Save')).toBeOnTheScreen();
+        // The pencil button is hidden in edit mode (only ⋯ remains).
+        expect(screen.queryByTestId('event-edit')).toBeNull();
+      });
 
-    it('pre-fills notes from the unavailable_day being edited', () => {
-      render(<AddItemSheet {...baseProps} editing={editingDay} />);
-      expect(screen.getByDisplayValue('Hawaii through Sunday')).toBeOnTheScreen();
-    });
+      it("renders 'Edit' as the heading and hides the kind toggle in edit mode", () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        enterEditMode();
+        expect(screen.getByText('Edit')).toBeOnTheScreen();
+        expect(screen.queryByTestId('kind-busy')).toBeNull();
+        expect(screen.queryByTestId('kind-unavailable')).toBeNull();
+      });
 
-    it('calls updateBusyBlock with the new values when saving an edited busy_block', async () => {
-      mockedUpdateBusy.mockResolvedValue({ error: null });
-      const onSaved = jest.fn();
-      const onClose = jest.fn();
-      render(
-        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
-      );
-
-      // User edits the title and pushes start later by an hour, and bumps
-      // the location text.
-      fireEvent.changeText(screen.getByDisplayValue('Yoga'), 'Yoga (rescheduled)');
-      fireEvent.changeText(screen.getByDisplayValue('Studio 5'), 'Studio 6');
-      await act(async () => {
+      it('pre-fills the title and time pickers from the busy_block being edited', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        enterEditMode();
+        expect(screen.getByDisplayValue('Yoga')).toBeOnTheScreen();
         const pickers = pickersByTestID();
-        pickers['time-picker-start'].onChange?.(new Date(2026, 4, 13, 15, 0));
-        pickers['time-picker-end'].onChange?.(new Date(2026, 4, 13, 16, 0));
-      });
-      fireEvent.press(screen.getByLabelText('Save'));
-
-      await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalledTimes(1));
-      const call = mockedUpdateBusy.mock.calls[0][0];
-      expect(call.id).toBe('bb1');
-      expect(call.title).toBe('Yoga (rescheduled)');
-      expect(call.startsAt.getHours()).toBe(15);
-      expect(call.endsAt.getHours()).toBe(16);
-      expect(call.location).toBe('Studio 6');
-      expect(call.notes).toBe('Hot vinyasa');
-
-      expect(mockedCreateBusy).not.toHaveBeenCalled();
-      await waitFor(() => expect(onSaved).toHaveBeenCalled());
-      await waitFor(() => expect(onClose).toHaveBeenCalled());
-    });
-
-    it('pre-fills the title for an unavailable_day in edit mode', () => {
-      render(<AddItemSheet {...baseProps} editing={editingDay} />);
-      expect(screen.getByDisplayValue('PTO')).toBeOnTheScreen();
-      // Unavailable mode → no time pickers.
-      expect(pickersByTestID()['time-picker-start']).toBeUndefined();
-    });
-
-    it('calls updateUnavailableDay with userId + date + edited notes when saving', async () => {
-      mockedUpdateUnavail.mockResolvedValue({ error: null });
-      render(<AddItemSheet {...baseProps} editing={editingDay} />);
-      fireEvent.changeText(screen.getByDisplayValue('PTO'), 'Sick day');
-      fireEvent.changeText(
-        screen.getByDisplayValue('Hawaii through Sunday'),
-        'Quick weekend trip',
-      );
-      fireEvent.press(screen.getByLabelText('Save'));
-
-      await waitFor(() =>
-        expect(mockedUpdateUnavail).toHaveBeenCalledWith({
-          userId: 'me-id',
-          date: '2026-05-13',
-          title: 'Sick day',
-          notes: 'Quick weekend trip',
-        }),
-      );
-    });
-
-    it('renders a Delete button only in edit mode', () => {
-      const { rerender } = render(<AddItemSheet {...baseProps} />);
-      expect(screen.queryByLabelText('Delete')).toBeNull();
-      rerender(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      expect(screen.getByLabelText('Delete')).toBeOnTheScreen();
-    });
-
-    it('confirms-then-deletes a busy_block via the Delete button', async () => {
-      mockedDeleteBusy.mockResolvedValue({ error: null });
-      const onSaved = jest.fn();
-      const onClose = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
-        destructive?.onPress?.();
+        expect(pickers['time-picker-start']?.value?.getHours()).toBe(14);
+        expect(pickers['time-picker-end']?.value?.getMinutes()).toBe(30);
       });
 
-      render(
-        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
-      );
-      fireEvent.press(screen.getByLabelText('Delete'));
-
-      // Alert was raised for confirmation.
-      expect(alertSpy).toHaveBeenCalled();
-      await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
-      // Sheet closes after delete completes.
-      await waitFor(() => expect(onSaved).toHaveBeenCalled());
-      await waitFor(() => expect(onClose).toHaveBeenCalled());
-
-      alertSpy.mockRestore();
-    });
-
-    it('confirms-then-deletes an unavailable_day via the Delete button', async () => {
-      mockedDeleteUnavail.mockResolvedValue({ error: null });
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
-        destructive?.onPress?.();
+      it('pre-fills both date pickers from a multi-day busy_block being edited', () => {
+        const editingTrip: CalendarItem = {
+          kind: 'busy_block',
+          id: 'trip',
+          user: me,
+          startsAt: new Date(2026, 4, 13, 18, 0),
+          endsAt: new Date(2026, 4, 15, 9, 0),
+          title: 'Hiking',
+          notes: null,
+          location: null,
+        };
+        render(<AddItemSheet {...baseProps} editing={editingTrip} />);
+        enterEditMode();
+        const dates = datePickersByTestID();
+        expect(dates['date-picker-start']?.value?.getDate()).toBe(13);
+        expect(dates['date-picker-end']?.value?.getDate()).toBe(15);
       });
 
-      render(<AddItemSheet {...baseProps} editing={editingDay} />);
-      fireEvent.press(screen.getByLabelText('Delete'));
-
-      await waitFor(() =>
-        expect(mockedDeleteUnavail).toHaveBeenCalledWith({
-          userId: 'me-id',
-          date: '2026-05-13',
-        }),
-      );
-
-      alertSpy.mockRestore();
-    });
-
-    it("does not delete when the Alert's Cancel button is chosen", async () => {
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const cancelBtn = (buttons ?? []).find((b) => b.style === 'cancel');
-        cancelBtn?.onPress?.();
+      it('pre-fills location and notes from the busy_block being edited', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        enterEditMode();
+        expect(screen.getByDisplayValue('Hot vinyasa')).toBeOnTheScreen();
+        expect(screen.getByDisplayValue('Studio 5')).toBeOnTheScreen();
       });
 
-      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      fireEvent.press(screen.getByLabelText('Delete'));
-
-      // Brief flush — confirm we don't sneak a delete in.
-      await act(async () => {
-        await Promise.resolve();
-      });
-      expect(mockedDeleteBusy).not.toHaveBeenCalled();
-
-      alertSpy.mockRestore();
-    });
-
-    it('renders a three-dot more-actions button only in edit mode', () => {
-      const { rerender } = render(<AddItemSheet {...baseProps} />);
-      expect(screen.queryByTestId('event-more-actions')).toBeNull();
-      rerender(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      expect(screen.getByTestId('event-more-actions')).toBeOnTheScreen();
-    });
-
-    it('the more-actions menu offers Copy event + Delete event for a busy_block', () => {
-      let capturedButtons: { text: string; style?: string }[] | undefined;
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        capturedButtons = buttons as typeof capturedButtons;
+      it('pre-fills notes from the unavailable_day being edited', () => {
+        render(<AddItemSheet {...baseProps} editing={editingDay} />);
+        enterEditMode();
+        expect(screen.getByDisplayValue('Hawaii through Sunday')).toBeOnTheScreen();
       });
 
-      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
-      fireEvent.press(screen.getByTestId('event-more-actions'));
+      it('calls updateBusyBlock with the new values when saving an edited busy_block', async () => {
+        mockedUpdateBusy.mockResolvedValue({ error: null });
+        const onSaved = jest.fn();
+        const onClose = jest.fn();
+        render(
+          <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+        );
+        enterEditMode();
 
-      const labels = (capturedButtons ?? []).map((b) => b.text);
-      expect(labels).toEqual(['Cancel', 'Copy event', 'Delete event']);
+        // User edits the title and pushes start later by an hour, and bumps
+        // the location text.
+        fireEvent.changeText(screen.getByDisplayValue('Yoga'), 'Yoga (rescheduled)');
+        fireEvent.changeText(screen.getByDisplayValue('Studio 5'), 'Studio 6');
+        await act(async () => {
+          const pickers = pickersByTestID();
+          pickers['time-picker-start'].onChange?.(new Date(2026, 4, 13, 15, 0));
+          pickers['time-picker-end'].onChange?.(new Date(2026, 4, 13, 16, 0));
+        });
+        fireEvent.press(screen.getByLabelText('Save'));
 
-      alertSpy.mockRestore();
-    });
+        await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalledTimes(1));
+        const call = mockedUpdateBusy.mock.calls[0][0];
+        expect(call.id).toBe('bb1');
+        expect(call.title).toBe('Yoga (rescheduled)');
+        expect(call.startsAt.getHours()).toBe(15);
+        expect(call.endsAt.getHours()).toBe(16);
+        expect(call.location).toBe('Studio 6');
+        expect(call.notes).toBe('Hot vinyasa');
 
-    it('the more-actions menu omits Copy for an unavailable_day (PK collision)', () => {
-      let capturedButtons: { text: string }[] | undefined;
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        capturedButtons = buttons as typeof capturedButtons;
+        expect(mockedCreateBusy).not.toHaveBeenCalled();
+        await waitFor(() => expect(onSaved).toHaveBeenCalled());
+        await waitFor(() => expect(onClose).toHaveBeenCalled());
       });
 
-      render(<AddItemSheet {...baseProps} editing={editingDay} />);
-      fireEvent.press(screen.getByTestId('event-more-actions'));
-
-      const labels = (capturedButtons ?? []).map((b) => b.text);
-      expect(labels).toEqual(['Cancel', 'Delete event']);
-
-      alertSpy.mockRestore();
-    });
-
-    it('"Copy event" creates a new busy_block with the same fields', async () => {
-      mockedCreateBusy.mockResolvedValue({ error: null });
-      const onSaved = jest.fn();
-      const onClose = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const copyBtn = (buttons ?? []).find((b) => b.text === 'Copy event');
-        copyBtn?.onPress?.();
+      it('pre-fills the title for an unavailable_day in edit mode', () => {
+        render(<AddItemSheet {...baseProps} editing={editingDay} />);
+        enterEditMode();
+        expect(screen.getByDisplayValue('PTO')).toBeOnTheScreen();
+        // Unavailable mode → no time pickers.
+        expect(pickersByTestID()['time-picker-start']).toBeUndefined();
       });
 
-      render(
-        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
-      );
-      fireEvent.press(screen.getByTestId('event-more-actions'));
+      it('calls updateUnavailableDay with userId + date + edited notes when saving', async () => {
+        mockedUpdateUnavail.mockResolvedValue({ error: null });
+        render(<AddItemSheet {...baseProps} editing={editingDay} />);
+        enterEditMode();
+        fireEvent.changeText(screen.getByDisplayValue('PTO'), 'Sick day');
+        fireEvent.changeText(
+          screen.getByDisplayValue('Hawaii through Sunday'),
+          'Quick weekend trip',
+        );
+        fireEvent.press(screen.getByLabelText('Save'));
 
-      await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalledTimes(1));
-      const call = mockedCreateBusy.mock.calls[0][0];
-      // Same fields as the editing item — no id (createBusyBlock derives a new one).
-      expect(call.title).toBe('Yoga');
-      expect(call.notes).toBe('Hot vinyasa');
-      expect(call.location).toBe('Studio 5');
-      expect(call.startsAt).toEqual(editingBusy.kind === 'busy_block' ? editingBusy.startsAt : new Date());
-      await waitFor(() => expect(onSaved).toHaveBeenCalled());
-      await waitFor(() => expect(onClose).toHaveBeenCalled());
-
-      alertSpy.mockRestore();
+        await waitFor(() =>
+          expect(mockedUpdateUnavail).toHaveBeenCalledWith({
+            userId: 'me-id',
+            date: '2026-05-13',
+            title: 'Sick day',
+            notes: 'Quick weekend trip',
+          }),
+        );
+      });
     });
 
-    it('toasts and stays open when the delete action fails', async () => {
-      mockedDeleteBusy.mockResolvedValue({ error: 'Server is grumpy' });
-      const onSaved = jest.fn();
-      const onClose = jest.fn();
-      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
-        const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
-        destructive?.onPress?.();
+    describe('three-dots popover menu', () => {
+      it('renders the three-dot more-actions button only when editing', () => {
+        const { rerender } = render(<AddItemSheet {...baseProps} />);
+        expect(screen.queryByTestId('event-more-actions')).toBeNull();
+        rerender(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        expect(screen.getByTestId('event-more-actions')).toBeOnTheScreen();
       });
 
-      render(
-        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
-      );
-      fireEvent.press(screen.getByLabelText('Delete'));
+      it('does NOT use Alert.alert — opens an in-sheet popover instead', () => {
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(alertSpy).not.toHaveBeenCalled();
+        // Popover items appear inline.
+        expect(screen.getByTestId('event-menu')).toBeOnTheScreen();
+        expect(screen.getByTestId('event-menu-copy')).toBeOnTheScreen();
+        expect(screen.getByTestId('event-menu-delete')).toBeOnTheScreen();
+        alertSpy.mockRestore();
+      });
 
-      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
-      expect(onSaved).not.toHaveBeenCalled();
-      expect(onClose).not.toHaveBeenCalled();
+      it('toggles the menu closed when the three-dots button is tapped a second time', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.getByTestId('event-menu')).toBeOnTheScreen();
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.queryByTestId('event-menu')).toBeNull();
+      });
 
-      alertSpy.mockRestore();
+      it('closes the menu when the scrim outside the popover is tapped', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.getByTestId('event-menu')).toBeOnTheScreen();
+        fireEvent.press(screen.getByTestId('event-menu-scrim'));
+        expect(screen.queryByTestId('event-menu')).toBeNull();
+      });
+
+      it('the menu offers Copy + Delete for a busy_block', () => {
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.getByTestId('event-menu-copy')).toBeOnTheScreen();
+        expect(screen.getByTestId('event-menu-delete')).toBeOnTheScreen();
+      });
+
+      it('the menu omits Copy for an unavailable_day (PK collision)', () => {
+        render(<AddItemSheet {...baseProps} editing={editingDay} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.queryByTestId('event-menu-copy')).toBeNull();
+        expect(screen.getByTestId('event-menu-delete')).toBeOnTheScreen();
+      });
+
+      it('"Copy event" creates a new busy_block with the same fields', async () => {
+        mockedCreateBusy.mockResolvedValue({ error: null });
+        const onSaved = jest.fn();
+        const onClose = jest.fn();
+        render(
+          <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+        );
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-copy'));
+
+        await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalledTimes(1));
+        const call = mockedCreateBusy.mock.calls[0][0];
+        expect(call.title).toBe('Yoga');
+        expect(call.notes).toBe('Hot vinyasa');
+        expect(call.location).toBe('Studio 5');
+        expect(call.startsAt).toEqual(
+          editingBusy.kind === 'busy_block' ? editingBusy.startsAt : new Date(),
+        );
+        await waitFor(() => expect(onSaved).toHaveBeenCalled());
+        await waitFor(() => expect(onClose).toHaveBeenCalled());
+      });
+
+      it('"Delete event" prompts for confirmation, then deletes the busy_block', async () => {
+        mockedDeleteBusy.mockResolvedValue({ error: null });
+        const onSaved = jest.fn();
+        const onClose = jest.fn();
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+          destructive?.onPress?.();
+        });
+
+        render(
+          <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+        );
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-delete'));
+
+        // Alert was raised for confirmation.
+        expect(alertSpy).toHaveBeenCalled();
+        await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
+        await waitFor(() => expect(onSaved).toHaveBeenCalled());
+        await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+        alertSpy.mockRestore();
+      });
+
+      it('"Delete event" deletes an unavailable_day after confirmation', async () => {
+        mockedDeleteUnavail.mockResolvedValue({ error: null });
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+          destructive?.onPress?.();
+        });
+
+        render(<AddItemSheet {...baseProps} editing={editingDay} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-delete'));
+
+        await waitFor(() =>
+          expect(mockedDeleteUnavail).toHaveBeenCalledWith({
+            userId: 'me-id',
+            date: '2026-05-13',
+          }),
+        );
+
+        alertSpy.mockRestore();
+      });
+
+      it("does not delete when the Alert's Cancel button is chosen", async () => {
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const cancelBtn = (buttons ?? []).find((b) => b.style === 'cancel');
+          cancelBtn?.onPress?.();
+        });
+
+        render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-delete'));
+
+        // Brief flush — confirm we don't sneak a delete in.
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(mockedDeleteBusy).not.toHaveBeenCalled();
+
+        alertSpy.mockRestore();
+      });
+
+      it('toasts and stays open when the delete action fails', async () => {
+        mockedDeleteBusy.mockResolvedValue({ error: 'Server is grumpy' });
+        const onSaved = jest.fn();
+        const onClose = jest.fn();
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+          destructive?.onPress?.();
+        });
+
+        render(
+          <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+        );
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-delete'));
+
+        await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
+        expect(onSaved).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+
+        alertSpy.mockRestore();
+      });
     });
   });
 

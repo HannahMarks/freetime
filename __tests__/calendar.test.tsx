@@ -490,7 +490,7 @@ describe('CalendarScreen', () => {
       expect(fab).toHaveStyle({ backgroundColor: '#9C27B0' });
     });
 
-    it("opens the edit sheet directly when the user taps their own item (no action sheet)", async () => {
+    it("opens the sheet in view mode when the user taps their own item (no action sheet)", async () => {
       mockedList.mockResolvedValue({
         data: [
           {
@@ -514,10 +514,12 @@ describe('CalendarScreen', () => {
 
       fireEvent.press(screen.getByTestId('day-block-bb1'));
 
-      // No Alert.alert action sheet — the sheet opens directly in edit mode.
+      // No Alert.alert action sheet — the sheet opens in view mode showing
+      // the event details. The title becomes the sheet heading; the pencil
+      // button opens the edit form.
       expect(alertSpy).not.toHaveBeenCalled();
-      expect(screen.getByText('Edit')).toBeOnTheScreen();
-      expect(screen.getByDisplayValue('Standup')).toBeOnTheScreen();
+      expect(screen.getByText('Standup')).toBeOnTheScreen();
+      expect(screen.getByTestId('event-edit')).toBeOnTheScreen();
 
       alertSpy.mockRestore();
     });
@@ -550,7 +552,7 @@ describe('CalendarScreen', () => {
       expect(mockedDeleteBusy).not.toHaveBeenCalled();
     });
 
-    it("opens the edit sheet directly when the user taps their own unavailable_day banner", async () => {
+    it("opens the sheet in view mode when the user taps their own unavailable_day banner", async () => {
       mockedList.mockResolvedValue({
         data: [{ kind: 'unavailable_day', user: me, date: '2026-05-13', title: 'PTO' , notes: null }],
         error: null,
@@ -563,8 +565,9 @@ describe('CalendarScreen', () => {
       fireEvent.press(screen.getByTestId('day-banner-me-id'));
 
       expect(alertSpy).not.toHaveBeenCalled();
-      expect(screen.getByText('Edit')).toBeOnTheScreen();
-      expect(screen.getByDisplayValue('PTO')).toBeOnTheScreen();
+      // View mode: title in heading, pencil to switch to edit form.
+      expect(screen.getByText('PTO')).toBeOnTheScreen();
+      expect(screen.getByTestId('event-edit')).toBeOnTheScreen();
 
       alertSpy.mockRestore();
     });
@@ -597,7 +600,9 @@ describe('CalendarScreen', () => {
       await flushAsync();
 
       fireEvent.press(screen.getByTestId('day-block-bb1'));
-      fireEvent.press(screen.getByLabelText('Delete'));
+      // View mode → tap three-dots → tap "Delete event" in the popover.
+      fireEvent.press(screen.getByTestId('event-more-actions'));
+      fireEvent.press(screen.getByTestId('event-menu-delete'));
 
       await waitFor(() => expect(mockedDeleteBusy).toHaveBeenCalledWith('bb1'));
       // Initial mount fetch + post-delete refetch.

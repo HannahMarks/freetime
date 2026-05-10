@@ -16,11 +16,12 @@ import {
 } from '../lib/calendar-helpers';
 import { DayTimeline } from './DayTimeline';
 
-// Match the week-strip carousel's slow + smooth feel.
-// Easing.inOut(cubic) has a gentle start and end with fluid middle,
-// rather than the punchy front-loaded curve of Easing.out(cubic).
-const SLIDE_DURATION_MS = 240;
-const SPRING_BACK_DURATION_MS = 180;
+// Long + gentle. The user kept perceiving 240ms as "really snappy",
+// so leaning into a more cinematic feel — Easing.inOut(cubic) with
+// a noticeably longer duration. 360ms is the upper end of "doesn't
+// feel slow", and the gentle start/end avoids any punchy snap.
+const SLIDE_DURATION_MS = 360;
+const SPRING_BACK_DURATION_MS = 240;
 const SLIDE_EASING = Easing.inOut(Easing.cubic);
 
 type Props = {
