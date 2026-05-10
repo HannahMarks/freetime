@@ -36,11 +36,20 @@ import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const SHEET_TOP_OFFSET = 60;
-const ENTER_DURATION_MS = 240;
-const EXIT_DURATION_MS = 200;
+/** 0 = full-screen modal. The sheet covers everything edge-to-edge. */
+const SHEET_TOP_OFFSET = 0;
+const ENTER_DURATION_MS = 280;
+/** Used by the visibility-driven exit animation when the sheet is being
+ * dismissed by means OTHER than a swipe (Close button, backdrop tap).
+ * The swipe-dismiss path drives its own withTiming inline, sized to feel
+ * continuous with the user's gesture velocity. */
+const EXIT_DURATION_MS = 220;
 /** Faded color for placeholder text + the "(optional)" hint inside inputs. */
 const PLACEHOLDER_COLOR = '#b5b5b5';
+/** Initial scale for the entry zoom-in. Smaller = more dramatic bloom on
+ * open. 0.7 reads as a clear "popping into existence" effect, paired with
+ * a bouncy spring landing. */
+const ENTRY_SCALE_FROM = 0.7;
 
 type Kind = 'busy' | 'unavailable';
 
@@ -155,22 +164,25 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   // unmount only after the slide-down completes.
   const [rendered, setRendered] = useState<boolean>(visible);
   const translateY = useSharedValue(visible ? 0 : SCREEN_HEIGHT);
-  const scale = useSharedValue(visible ? 1 : 0.94);
+  const scale = useSharedValue(visible ? 1 : ENTRY_SCALE_FROM);
   const backdropOpacity = useSharedValue(visible ? 0.4 : 0);
 
   useEffect(() => {
     if (visible) {
       setRendered(true);
-      // Slightly bouncier spring for the slide-up; scale-in on top
-      // gives the sheet more presence when it lands.
+      // Slide-up + zoom-in. Scale uses a noticeably bouncier spring so
+      // the sheet visibly overshoots a touch before settling — that
+      // overshoot is what reads as the "zoom in" the user wants. The
+      // translation spring is more critically damped so the sheet
+      // doesn't bob vertically on land.
       translateY.value = withSpring(0, {
-        damping: 18,
+        damping: 22,
         stiffness: 220,
         mass: 0.9,
       });
       scale.value = withSpring(1, {
-        damping: 16,
-        stiffness: 220,
+        damping: 12,
+        stiffness: 200,
         mass: 0.9,
       });
       backdropOpacity.value = withTiming(0.4, {
@@ -178,20 +190,26 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
         easing: Easing.out(Easing.cubic),
       });
     } else if (rendered) {
+      // Easing.out (NOT Easing.in) on the way out: starts moving fast
+      // immediately and decelerates. Easing.in does the opposite — it
+      // sits still for the first half of the animation, which felt
+      // jerky after a fast tap on Close (and ESPECIALLY jerky if a
+      // swipe-dismiss has already kicked off momentum, because the
+      // visibility-driven animation would brake before continuing).
       translateY.value = withTiming(
         SCREEN_HEIGHT,
-        { duration: EXIT_DURATION_MS, easing: Easing.in(Easing.cubic) },
+        { duration: EXIT_DURATION_MS, easing: Easing.out(Easing.cubic) },
         (finished) => {
           if (finished) runOnJS(setRendered)(false);
         },
       );
-      scale.value = withTiming(0.94, {
+      scale.value = withTiming(ENTRY_SCALE_FROM, {
         duration: EXIT_DURATION_MS,
-        easing: Easing.in(Easing.cubic),
+        easing: Easing.out(Easing.cubic),
       });
       backdropOpacity.value = withTiming(0, {
         duration: EXIT_DURATION_MS,
-        easing: Easing.in(Easing.cubic),
+        easing: Easing.out(Easing.cubic),
       });
     }
   }, [visible, rendered, translateY, scale, backdropOpacity]);
@@ -203,27 +221,58 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     opacity: backdropOpacity.value,
   }));
 
-  // Swipe-down to dismiss. minDistance(8) activates after 8px of
-  // touch movement in ANY direction — important for catching swipes
-  // that start on text/inputs/the ScrollView body, where directional
-  // activation thresholds were getting absorbed by the inner scroll.
-  // We still only translate on downward motion (negative translations
-  // are clamped to 0).
+  // Tracks the translationY at gesture activation. Without this, the
+  // sheet would teleport down by `minDistance` pixels the instant the
+  // gesture activates (since the gesture's translationY is cumulative
+  // from touch-start, not from activation). Subtracting the activation
+  // offset means the sheet's motion is continuous with the finger.
+  const dismissActivationY = useSharedValue(0);
+
+  // Swipe-down to dismiss. minDistance(6) is a small enough activation
+  // distance to feel responsive while still ignoring micro-jitters; we
+  // also subtract the activation translation to avoid a jump-on-activate.
+  // The dismiss path drives its OWN withTiming so the off-screen slide
+  // continues at the user's gesture velocity instead of being braked by
+  // a visibility-driven exit animation.
   const dismissPan = Gesture.Pan()
-    .minDistance(8)
+    .minDistance(6)
+    .onStart((e) => {
+      dismissActivationY.value = e.translationY;
+    })
     .onUpdate((e) => {
-      translateY.value = Math.max(0, e.translationY);
+      translateY.value = Math.max(0, e.translationY - dismissActivationY.value);
     })
     .onEnd((e) => {
       const shouldDismiss =
-        e.translationY > SCREEN_HEIGHT * 0.2 || e.velocityY > 500;
+        e.translationY > SCREEN_HEIGHT * 0.18 || e.velocityY > 450;
       if (shouldDismiss) {
-        runOnJS(onClose)();
+        // Continue the slide off-screen smoothly, THEN call onClose.
+        // Calling onClose immediately would trigger the visibility
+        // effect's withTiming, which competes with the gesture
+        // velocity and produces a perceptible stutter at hand-off.
+        // Once translateY hits SCREEN_HEIGHT, the visibility effect's
+        // animation is a no-op (it's already there).
+        translateY.value = withTiming(
+          SCREEN_HEIGHT,
+          { duration: 240, easing: Easing.out(Easing.cubic) },
+          (finished) => {
+            if (finished) runOnJS(onClose)();
+          },
+        );
+        backdropOpacity.value = withTiming(0, {
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+        });
+        scale.value = withTiming(ENTRY_SCALE_FROM, {
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+        });
       } else {
+        // Critically-damped spring back — no bobbing, no overshoot.
         translateY.value = withSpring(0, {
-          damping: 22,
-          stiffness: 240,
-          mass: 0.8,
+          damping: 28,
+          stiffness: 200,
+          mass: 0.9,
         });
       }
     });
@@ -365,10 +414,13 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   }
 
   const inViewMode = !!editing && !formMode;
+  // View mode shows the user's own title only — when there's no title we
+  // render an empty heading area rather than falling back to "Busy time"
+  // (the date / time / location / notes lines below carry the meaning).
   const heading = !editing
     ? 'Add to your day'
     : inViewMode
-      ? (editing.title ?? (editing.kind === 'busy_block' ? 'Busy time' : 'Unavailable day'))
+      ? (editing.title ?? '')
       : 'Edit';
 
   // Read-only display strings for view mode.
@@ -440,14 +492,15 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                     pressed && styles.headerIconButtonPressed,
                   ]}
                 >
-                  {/* Manual-drawn pencil glyph (two thin Views): a long
-                      slanted body + a short tip — keeps alignment
-                      consistent across platforms instead of relying on
-                      a Unicode glyph (✎ varies wildly by font). */}
-                  <View style={styles.pencilBox}>
-                    <View style={styles.pencilBody} />
-                    <View style={styles.pencilTip} />
-                  </View>
+                  {/* Pencil emoji (U+270F + VS-16 emoji presentation).
+                      The earlier hand-drawn two-bar version did not read
+                      as a pencil; the system emoji is universally
+                      recognized, even if it's a colorful glyph next to
+                      the monochrome ⋯. Sized + line-height-tuned so the
+                      glyph sits visually centered in the 36×36 button. */}
+                  <Text style={styles.pencilEmoji} accessibilityElementsHidden>
+                    ✏️
+                  </Text>
                 </Pressable>
               ) : null}
               <Pressable
@@ -474,7 +527,7 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           style={styles.flex}
         >
           {inViewMode ? (
-            <ScrollView contentContainerStyle={styles.body}>
+            <ScrollView contentContainerStyle={styles.viewBody}>
               <View style={styles.viewRow}>
                 <Text style={styles.viewLabel}>When</Text>
                 <Text style={styles.viewValue} testID="view-date">{viewDate}</Text>
@@ -529,7 +582,8 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
 
               <View style={styles.field}>
                 <TextInput
-                  placeholder={kind === 'busy' ? 'Lunch with Sarah' : 'Family wedding'}
+                  testID="input-title"
+                  placeholder="Title (optional)"
                   placeholderTextColor={PLACEHOLDER_COLOR}
                   style={styles.input}
                   value={title}
@@ -672,14 +726,11 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    // Edge-to-edge: no rounded top, no shadow — the sheet covers the
+    // whole screen so nothing peeks behind it. (Old SHEET_TOP_OFFSET=60
+    // version DID have rounded corners + shadow; with offset=0 those
+    // would just be invisible borders against the screen edge.)
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowOffset: { width: 0, height: -2 },
-    shadowRadius: 12,
-    elevation: 12,
   },
   container: { flex: 1, backgroundColor: '#fff' },
   flex: { flex: 1 },
@@ -716,48 +767,33 @@ const styles = StyleSheet.create({
   },
   headerIconButtonPressed: { backgroundColor: '#f0f0f0' },
   moreIcon: { fontSize: 22, lineHeight: 24, color: '#111', fontWeight: '700' },
-  // Manual pencil glyph: a slanted bar (the body) plus a small triangle
-  // (drawn as a rotated square stub) for the tip. Keeps the icon visually
-  // consistent across iOS / Android instead of relying on a Unicode pencil.
-  pencilBox: {
-    width: 18,
-    height: 18,
-    position: 'relative',
-  },
-  pencilBody: {
-    position: 'absolute',
-    top: 6.5,
-    left: -1,
-    width: 18,
-    height: 2.5,
-    borderRadius: 1.25,
-    backgroundColor: '#111',
-    transform: [{ rotate: '-45deg' }],
-  },
-  pencilTip: {
-    position: 'absolute',
-    top: 11.5,
-    left: 0,
-    width: 4,
-    height: 4,
-    backgroundColor: '#111',
-    transform: [{ rotate: '45deg' }],
+  pencilEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   body: {
     paddingHorizontal: 20,
     paddingVertical: 16,
     gap: 16,
   },
-  // View mode rows: small uppercase label, then one or more value lines.
-  viewRow: { gap: 4 },
+  // View mode body uses bigger padding + spacing so the read-only details
+  // breathe in the now-full-screen sheet (when SHEET_TOP_OFFSET was 60 the
+  // 16-pad form felt full; in full-screen the same padding looks cramped).
+  viewBody: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    gap: 28,
+  },
+  viewRow: { gap: 6 },
   viewLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#888',
     fontWeight: '600',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
-  viewValue: { fontSize: 16, color: '#111', lineHeight: 22 },
+  viewValue: { fontSize: 17, color: '#111', lineHeight: 24 },
   toggleRow: { flexDirection: 'row', gap: 8 },
   toggle: {
     flex: 1,

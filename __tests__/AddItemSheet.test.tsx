@@ -109,7 +109,7 @@ describe('AddItemSheet', () => {
 
   it('defaults to busy-time mode and renders start + end TimePickers initialized to 9:00–10:00 on the selected day', () => {
     render(<AddItemSheet {...baseProps} />);
-    expect(screen.getByPlaceholderText('Lunch with Sarah')).toBeOnTheScreen();
+    expect(screen.getByPlaceholderText('Title (optional)')).toBeOnTheScreen();
 
     const pickers = pickersByTestID();
     const start = pickers['time-picker-start'];
@@ -129,7 +129,7 @@ describe('AddItemSheet', () => {
     fireEvent.press(screen.getByTestId('kind-unavailable'));
     expect(capturedPickers).toHaveLength(0);
     expect(capturedDatePickers).toHaveLength(0);
-    expect(screen.getByPlaceholderText('Family wedding')).toBeOnTheScreen();
+    expect(screen.getByPlaceholderText('Title (optional)')).toBeOnTheScreen();
   });
 
   it('renders Location and Notes inputs in busy mode', () => {
@@ -148,7 +148,7 @@ describe('AddItemSheet', () => {
   it('saves a busy_block with the entered location and notes', async () => {
     mockedCreateBusy.mockResolvedValue({ error: null });
     render(<AddItemSheet {...baseProps} />);
-    fireEvent.changeText(screen.getByPlaceholderText('Lunch with Sarah'), 'Lunch');
+    fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'Lunch');
     fireEvent.changeText(screen.getByTestId('input-location'), 'Cafe Borrone');
     fireEvent.changeText(screen.getByTestId('input-notes'), 'Bring the deck');
     fireEvent.press(screen.getByLabelText('Save'));
@@ -174,7 +174,7 @@ describe('AddItemSheet', () => {
     mockedCreateUnavail.mockResolvedValue({ error: null });
     render(<AddItemSheet {...baseProps} />);
     fireEvent.press(screen.getByTestId('kind-unavailable'));
-    fireEvent.changeText(screen.getByPlaceholderText('Family wedding'), 'PTO');
+    fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'PTO');
     fireEvent.changeText(screen.getByTestId('input-notes'), 'Out of state');
     fireEvent.press(screen.getByLabelText('Save'));
 
@@ -199,7 +199,7 @@ describe('AddItemSheet', () => {
   it('saves a multi-day busy_block when the end date is moved to a later day', async () => {
     mockedCreateBusy.mockResolvedValue({ error: null });
     render(<AddItemSheet {...baseProps} />);
-    fireEvent.changeText(screen.getByPlaceholderText('Lunch with Sarah'), 'Hiking trip');
+    fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'Hiking trip');
 
     await act(async () => {
       const times = pickersByTestID();
@@ -266,7 +266,7 @@ describe('AddItemSheet', () => {
     const onSaved = jest.fn();
     render(<AddItemSheet {...baseProps} onClose={onClose} onSaved={onSaved} />);
 
-    fireEvent.changeText(screen.getByPlaceholderText('Lunch with Sarah'), 'Lunch');
+    fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'Lunch');
 
     // Simulate the user scrolling each picker to a new time. Wrap in act
     // so the resulting state updates flush before we tap Save.
@@ -359,13 +359,20 @@ describe('AddItemSheet', () => {
         expect(screen.queryByText('Edit')).toBeNull();
       });
 
-      it('falls back to "Busy time" / "Unavailable day" when the item has no title', () => {
+      it('shows no fallback heading when the item has no title (the date / time lines below carry the meaning)', () => {
         const untitledBusy: CalendarItem = { ...editingBusy, title: null };
         const untitledDay: CalendarItem = { ...editingDay, title: null };
         const { rerender } = render(<AddItemSheet {...baseProps} editing={untitledBusy} />);
-        expect(screen.getByText('Busy time')).toBeOnTheScreen();
+        // No "Busy time" / "Unavailable day" sentinel string in the heading.
+        expect(screen.queryByText('Busy time')).toBeNull();
+        expect(screen.queryByText('Unavailable day')).toBeNull();
         rerender(<AddItemSheet {...baseProps} editing={untitledDay} />);
-        expect(screen.getByText('Unavailable day')).toBeOnTheScreen();
+        expect(screen.queryByText('Busy time')).toBeNull();
+        expect(screen.queryByText('Unavailable day')).toBeNull();
+        // The view-mode body still renders the date + time so the user
+        // can still tell what this event is.
+        expect(screen.getByTestId('view-date')).toBeOnTheScreen();
+        expect(screen.getByTestId('view-time')).toBeOnTheScreen();
       });
 
       it('renders the date, time range, location, and notes as read-only text', () => {
@@ -712,7 +719,7 @@ describe('AddItemSheet', () => {
     const onClose = jest.fn();
     render(<AddItemSheet {...baseProps} onSaved={onSaved} onClose={onClose} />);
     fireEvent.press(screen.getByTestId('kind-unavailable'));
-    fireEvent.changeText(screen.getByPlaceholderText('Family wedding'), 'Sick');
+    fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'Sick');
     fireEvent.press(screen.getByLabelText('Save'));
 
     await waitFor(() =>

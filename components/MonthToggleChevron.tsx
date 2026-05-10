@@ -29,10 +29,16 @@ export const monthHeaderLineHeight = 28;
  * previous 28° angle left a visible gap between the arm tips, so
  * the V never properly closed.
  */
-const CHEVRON_WIDTH = 18;
-const CHEVRON_HEIGHT = 9;
-const ARM_WIDTH = 11.25;
-const ARM_THICKNESS = 2.25;
+// Smaller + bolder. The 18×9 / 2.25 stroke version was the right shape
+// but read as too dainty next to the bold month label. Shrunk to 14×7
+// (78% of the previous width) and the stroke bumped to 3 — same V, but
+// reads as a confident bold glyph instead of a pencil-line outline.
+// ARM_WIDTH = CHEVRON_HEIGHT × 1.25 must hold for arms to meet at the
+// bottom-center vertex.
+const CHEVRON_WIDTH = 14;
+const CHEVRON_HEIGHT = 7;
+const ARM_WIDTH = 8.75;
+const ARM_THICKNESS = 3;
 const ARM_TILT_DEG = 53;
 
 type Props = {
