@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -63,12 +63,18 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
   // so it can't go stale mid-swipe).
   const [layoutDate, setLayoutDate] = useState(selectedDate);
 
-  // Re-sync when selectedDate changes from outside (week-strip cell
-  // tap, day-carousel swipe across week boundary, month-grid tap).
-  useEffect(() => {
-    setLayoutDate((current) => (current === selectedDate ? current : selectedDate));
+  // Sync layoutDate with the prop AND reset translateX, both in
+  // useLayoutEffect (synchronous after React commit, before paint) so
+  // the same paint shows the new layout AT translateX=0. Without this,
+  // the worklet's translateX update could land on a different frame
+  // than the React layout commit, briefly painting the wrong pane at
+  // center → "text changes after the swipe" flicker.
+  useLayoutEffect(() => {
+    if (layoutDate !== selectedDate) {
+      setLayoutDate(selectedDate);
+    }
     translateX.value = 0;
-  }, [selectedDate, translateX]);
+  }, [selectedDate, layoutDate, translateX]);
 
   // True from Pan activation until POST_SWIPE_TAP_LOCKOUT_MS after the
   // gesture finalizes. While true, cell-level taps inside any pane are
@@ -95,11 +101,13 @@ export function SwipeableWeekStrip({ selectedDate, todayIso, todayColor, onDateC
   }
 
   function commitSwipe(newDate: string) {
-    // Atomic swap: layoutDate, translateX, and parent's selectedDate
-    // all change together so the next render shows the new "curr"
-    // pane already centered without a one-frame flicker.
+    // Just dispatch the React state updates — translateX will be
+    // reset to 0 by the useLayoutEffect above as soon as
+    // setSelectedDate / setLayoutDate commit. Doing translateX = 0
+    // here would happen on the worklet's next sync, which can land on
+    // a different paint than the React commit and briefly show the
+    // wrong pane at center.
     setLayoutDate(newDate);
-    translateX.value = 0;
     onDateChange(newDate);
   }
 

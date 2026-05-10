@@ -16,9 +16,12 @@ import {
 } from '../lib/calendar-helpers';
 import { DayTimeline } from './DayTimeline';
 
-const SLIDE_DURATION_MS = 140;
-const SPRING_BACK_DURATION_MS = 120;
-const SLIDE_EASING = Easing.out(Easing.cubic);
+// Match the week-strip carousel's slow + smooth feel.
+// Easing.inOut(cubic) has a gentle start and end with fluid middle,
+// rather than the punchy front-loaded curve of Easing.out(cubic).
+const SLIDE_DURATION_MS = 240;
+const SPRING_BACK_DURATION_MS = 180;
+const SLIDE_EASING = Easing.inOut(Easing.cubic);
 
 type Props = {
   /** YYYY-MM-DD of the day currently centered. */

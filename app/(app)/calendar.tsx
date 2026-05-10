@@ -234,20 +234,25 @@ export default function CalendarScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header: month label on the left, chevron toggle on the right. */}
-      <View style={styles.headerRow}>
+      {/* Header: month label on the left, chevron toggle on the right.
+          The whole row is a Pressable so tapping the label OR the
+          chevron toggles the month grid. The chevron itself owns the
+          accessibility label + role; the outer row is just an
+          extended hit area, so it stays accessibility-invisible to
+          avoid duplicate labels for screen readers + tests. */}
+      <Pressable
+        style={styles.headerRow}
+        onPress={() => setMonthVisible((v) => !v)}
+        accessible={false}
+      >
         <Text style={styles.monthLabel} testID="month-label">
-          {/* Tracks the *visible* month (`month` state), not the
-              selected day's month — when the user pages the grid into
-              another month or swipes the day timeline across a
-              boundary, the label follows. */}
           {formatMonthLabel(monthInitial, initial.today.getFullYear())}
         </Text>
         <MonthToggleChevron
           expanded={monthVisible}
           onPress={() => setMonthVisible((v) => !v)}
         />
-      </View>
+      </Pressable>
 
       {/* Single-layer toggle with an animated height. When the user
           taps the chevron, monthVisible flips and the wrapper grows
