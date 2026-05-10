@@ -165,23 +165,21 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     opacity: backdropOpacity.value,
   }));
 
-  // Swipe-down to dismiss. Activates only after a clearly downward
-  // drag (>20px), and fails on horizontal motion >30px so it doesn't
-  // hijack scrolls / drags inside the sheet content. On release past
-  // a threshold (~25% of screen height OR a fast flick), call onClose
-  // — the existing `visible` effect plays the exit animation. Below
-  // threshold: spring back to 0.
+  // Swipe-down to dismiss. Easy activation (8px down), no horizontal
+  // fail constraint — the gesture is meant to be triggerable from
+  // anywhere on the sheet, including the body, not just the top
+  // bar. The inner ScrollView still scrolls vertically when content
+  // is taller than the sheet (gesture-handler's coordination handles
+  // the case where the user has scrolled and now wants to scroll
+  // up further: the scroll wins until the user is at the top).
   const dismissPan = Gesture.Pan()
-    .activeOffsetY([-9999, 20])
-    .failOffsetX([-30, 30])
+    .activeOffsetY([-9999, 8])
     .onUpdate((e) => {
-      // Track downward drag only. Subtle resistance for over-pull
-      // by halving the translation past the dismiss threshold.
       translateY.value = Math.max(0, e.translationY);
     })
     .onEnd((e) => {
       const shouldDismiss =
-        e.translationY > SCREEN_HEIGHT * 0.25 || e.velocityY > 600;
+        e.translationY > SCREEN_HEIGHT * 0.2 || e.velocityY > 500;
       if (shouldDismiss) {
         runOnJS(onClose)();
       } else {
@@ -264,6 +262,42 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     }
   }
 
+  async function handleCopy() {
+    if (!editing || editing.kind !== 'busy_block' || submitting) return;
+    setSubmitting(true);
+    try {
+      const { error } = await createBusyBlock({
+        startsAt: editing.startsAt,
+        endsAt: editing.endsAt,
+        title: editing.title,
+        notes: editing.notes,
+        location: editing.location,
+      });
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      onSaved();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleMore() {
+    if (!editing || submitting) return;
+    // Copy is only meaningful for busy_blocks. unavailable_days have a
+    // unique (user_id, date) PK so a literal copy would 23505-collide.
+    const buttons = [
+      { text: 'Cancel', style: 'cancel' as const },
+      ...(editing.kind === 'busy_block'
+        ? [{ text: 'Copy event', onPress: handleCopy }]
+        : []),
+      { text: 'Delete event', style: 'destructive' as const, onPress: handleDelete },
+    ];
+    Alert.alert('Event actions', undefined, buttons);
+  }
+
   function handleDelete() {
     if (!editing || submitting) return;
     Alert.alert('Delete this item?', undefined, [
@@ -331,7 +365,20 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
             <Text style={styles.closeIcon}>×</Text>
           </Pressable>
           <Text style={styles.heading}>{heading}</Text>
-          <View style={styles.headerSpacer} />
+          {editing ? (
+            <Pressable
+              onPress={handleMore}
+              accessibilityRole="button"
+              accessibilityLabel="Event actions"
+              testID="event-more-actions"
+              hitSlop={12}
+              style={({ pressed }) => [styles.moreButton, pressed && styles.moreButtonPressed]}
+            >
+              <Text style={styles.moreIcon}>⋯</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.headerSpacer} />
+          )}
         </View>
 
         <KeyboardAvoidingView
@@ -519,6 +566,15 @@ const styles = StyleSheet.create({
   closeIcon: { fontSize: 28, lineHeight: 30, color: '#111', fontWeight: '300' },
   heading: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '600', color: '#111' },
   headerSpacer: { width: 36, height: 36 },
+  moreButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+  },
+  moreButtonPressed: { backgroundColor: '#f0f0f0' },
+  moreIcon: { fontSize: 22, lineHeight: 24, color: '#111', fontWeight: '700' },
   body: {
     paddingHorizontal: 20,
     paddingVertical: 16,

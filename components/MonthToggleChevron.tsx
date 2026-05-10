@@ -19,12 +19,21 @@ export const monthHeaderLineHeight = 28;
  * the visual center stays at the container's geometric center
  * regardless of rotation (a Unicode `⌄` glyph has its mass off-center
  * within the line box, which made it impossible to align with the
- * adjacent text across both rotated states). */
+ * adjacent text across both rotated states).
+ *
+ * The angle for the two arms to meet exactly at the bottom-center
+ * vertex satisfies `2 sin θ = 1 + cos θ` — solved at θ ≈ 53.13°,
+ * regardless of container dimensions. Arm length then = container
+ * height / sin(53.13°) = 1.25 × container height. With container
+ * 16×8, arms are 10 wide at 53° and meet exactly at (8, 8). The
+ * previous 28° angle left a visible gap between the arm tips, so
+ * the V never properly closed.
+ */
 const CHEVRON_WIDTH = 16;
 const CHEVRON_HEIGHT = 8;
-const ARM_WIDTH = 11;
+const ARM_WIDTH = 10;
 const ARM_THICKNESS = 2.5;
-const ARM_TILT_DEG = 28;
+const ARM_TILT_DEG = 53;
 
 type Props = {
   /** True when the month grid is expanded (chevron points up). */

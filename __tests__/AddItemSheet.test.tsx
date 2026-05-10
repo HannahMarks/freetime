@@ -517,6 +517,70 @@ describe('AddItemSheet', () => {
       alertSpy.mockRestore();
     });
 
+    it('renders a three-dot more-actions button only in edit mode', () => {
+      const { rerender } = render(<AddItemSheet {...baseProps} />);
+      expect(screen.queryByTestId('event-more-actions')).toBeNull();
+      rerender(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      expect(screen.getByTestId('event-more-actions')).toBeOnTheScreen();
+    });
+
+    it('the more-actions menu offers Copy event + Delete event for a busy_block', () => {
+      let capturedButtons: { text: string; style?: string }[] | undefined;
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        capturedButtons = buttons as typeof capturedButtons;
+      });
+
+      render(<AddItemSheet {...baseProps} editing={editingBusy} />);
+      fireEvent.press(screen.getByTestId('event-more-actions'));
+
+      const labels = (capturedButtons ?? []).map((b) => b.text);
+      expect(labels).toEqual(['Cancel', 'Copy event', 'Delete event']);
+
+      alertSpy.mockRestore();
+    });
+
+    it('the more-actions menu omits Copy for an unavailable_day (PK collision)', () => {
+      let capturedButtons: { text: string }[] | undefined;
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        capturedButtons = buttons as typeof capturedButtons;
+      });
+
+      render(<AddItemSheet {...baseProps} editing={editingDay} />);
+      fireEvent.press(screen.getByTestId('event-more-actions'));
+
+      const labels = (capturedButtons ?? []).map((b) => b.text);
+      expect(labels).toEqual(['Cancel', 'Delete event']);
+
+      alertSpy.mockRestore();
+    });
+
+    it('"Copy event" creates a new busy_block with the same fields', async () => {
+      mockedCreateBusy.mockResolvedValue({ error: null });
+      const onSaved = jest.fn();
+      const onClose = jest.fn();
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const copyBtn = (buttons ?? []).find((b) => b.text === 'Copy event');
+        copyBtn?.onPress?.();
+      });
+
+      render(
+        <AddItemSheet {...baseProps} editing={editingBusy} onSaved={onSaved} onClose={onClose} />,
+      );
+      fireEvent.press(screen.getByTestId('event-more-actions'));
+
+      await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalledTimes(1));
+      const call = mockedCreateBusy.mock.calls[0][0];
+      // Same fields as the editing item — no id (createBusyBlock derives a new one).
+      expect(call.title).toBe('Yoga');
+      expect(call.notes).toBe('Hot vinyasa');
+      expect(call.location).toBe('Studio 5');
+      expect(call.startsAt).toEqual(editingBusy.kind === 'busy_block' ? editingBusy.startsAt : new Date());
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+      alertSpy.mockRestore();
+    });
+
     it('toasts and stays open when the delete action fails', async () => {
       mockedDeleteBusy.mockResolvedValue({ error: 'Server is grumpy' });
       const onSaved = jest.fn();
