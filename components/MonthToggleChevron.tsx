@@ -29,10 +29,10 @@ export const monthHeaderLineHeight = 28;
  * previous 28° angle left a visible gap between the arm tips, so
  * the V never properly closed.
  */
-const CHEVRON_WIDTH = 16;
-const CHEVRON_HEIGHT = 8;
-const ARM_WIDTH = 10;
-const ARM_THICKNESS = 2.5;
+const CHEVRON_WIDTH = 18;
+const CHEVRON_HEIGHT = 9;
+const ARM_WIDTH = 11.25;
+const ARM_THICKNESS = 2.25;
 const ARM_TILT_DEG = 53;
 
 type Props = {

@@ -11,12 +11,13 @@ import Animated, {
 import { shiftDate } from '../lib/calendar-helpers';
 import { WeekStrip } from './WeekStrip';
 
-// Compromise between "smoother" and "no perceived catch-up": shorter
-// than 240ms (which felt like the text needed to catch up at the end)
-// but with the same gentle inOut(cubic) curve, not the punchy
-// Easing.out(exp) front-load.
-const SLIDE_DURATION_MS = 180;
-const SPRING_BACK_DURATION_MS = 140;
+// Slightly longer than 180ms ("almost there but smoother") with the
+// same gentle inOut(cubic) curve. Pre-rendered next-pane content
+// means there's no actual layout flicker — what felt like "catch-up"
+// in the past was the slide duration itself, so 240 is a comfortable
+// landing.
+const SLIDE_DURATION_MS = 240;
+const SPRING_BACK_DURATION_MS = 180;
 const SLIDE_EASING = Easing.inOut(Easing.cubic);
 /** Hard-coded height of a single WeekStrip — chosen to match the
  * intrinsic height of WeekStrip's content (label + 30px bubble +
