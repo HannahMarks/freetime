@@ -11,9 +11,12 @@ import Animated, {
 import { shiftDate } from '../lib/calendar-helpers';
 import { WeekStrip } from './WeekStrip';
 
-const SLIDE_DURATION_MS = 140;
-const SPRING_BACK_DURATION_MS = 120;
-const SLIDE_EASING = Easing.out(Easing.exp);
+const SLIDE_DURATION_MS = 240;
+const SPRING_BACK_DURATION_MS = 180;
+// inOut bezier: gentle start, gentle end, fluid middle — feels smooth
+// rather than snappy. Easing.out(Easing.exp) (the previous easing) was
+// too aggressive on the front end.
+const SLIDE_EASING = Easing.inOut(Easing.cubic);
 /** Hard-coded height of a single WeekStrip — chosen to match the
  * intrinsic height of WeekStrip's content (label + 30px bubble +
  * vertical padding). Matters because the panes are absolute-positioned

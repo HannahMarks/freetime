@@ -82,7 +82,11 @@ export function SwipeableDayCarousel({
 
   const pan = Gesture.Pan()
     .activeOffsetX([-10, 10])
-    .failOffsetY([-15, 15])
+    // Widened from [-15, 15] so the horizontal swipe isn't aborted by
+    // the small vertical jitter that's natural when dragging a finger
+    // across a phone screen — was making day-changes very hard to
+    // trigger in practice.
+    .failOffsetY([-30, 30])
     .onUpdate((e) => {
       translateX.value = e.translationX;
     })

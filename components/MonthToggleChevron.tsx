@@ -37,9 +37,28 @@ export function MonthToggleChevron({ expanded, onPress }: Props) {
     });
   }, [expanded, rotation]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
+  const animatedStyle = useAnimatedStyle(() => {
+    // RN doesn't merge `transform` arrays across styles — the later
+    // style's transform replaces earlier ones. So scaleX + translateY
+    // must live INSIDE this animated style, not the static `chevron`
+    // style, otherwise they're silently dropped when the rotation is
+    // applied (this was a quiet bug for several rounds — the chevron
+    // wasn't actually scaled or translated, only rotated).
+    //
+    // The `⌄` glyph's visible mass shifts up/down depending on
+    // rotation (asymmetry inside its line box). Counteract by
+    // interpolating translateY against rotation so both the
+    // pointing-down and pointing-up states land on the text's
+    // optical center: 0° → +3px, 180° → -3px.
+    const compensation = 3 - (rotation.value / 180) * 6;
+    return {
+      transform: [
+        { translateY: compensation },
+        { scaleX: 3 },
+        { rotate: `${rotation.value}deg` },
+      ],
+    };
+  });
 
   return (
     <Pressable
@@ -77,11 +96,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     includeFontPadding: false,
-    // - scaleX(3) stretches the open arrow horizontally so the chevron
-    //   reads as a wide-and-flat shape, not a thin angle bracket.
-    // - translateY(-3) nudges the glyph up to compensate for the
-    //   `⌄` glyph sitting noticeably below its line-box's optical
-    //   center, putting its visual midpoint aligned with the text.
-    transform: [{ scaleX: 3 }, { translateY: -3 }],
+    // No `transform` here — all transforms (scaleX, translateY,
+    // rotate) live in the animated style above, because RN replaces
+    // (not merges) `transform` arrays across the style cascade.
   },
 });

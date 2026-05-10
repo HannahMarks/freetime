@@ -36,12 +36,26 @@ import { toast } from '../../lib/toast';
 
 const SELECTED_BG = '#111';
 const WEEK_STRIP_HEIGHT = 70;
-// Fits the worst-case 6-row month (e.g. May 2026 — May 1 is a Friday,
-// May 31 is a Sunday, so the grid spans 6 week rows) plus the weekday
-// header row + a hairline of breathing room before the divider. Less
-// than ~340 and the bottom row gets clipped right where the divider
-// is, hiding days like the 31st.
-const MONTH_GRID_HEIGHT = 340;
+// CalendarList day-row height + weekday-header-row height. Add together
+// + small buffer to size the wrapper for any month — a 4-row month
+// (e.g. Feb 2026, Sun-aligned) gets 4 rows of cells; a 6-row month
+// (e.g. May 2026, Fri-start with 31 days) gets 6.
+const CAL_HEADER_HEIGHT = 32;
+const CAL_ROW_HEIGHT = 50;
+const CAL_BOTTOM_BUFFER = 8;
+
+/** How many week-rows the visible month grid will render. Counts the
+ * cells the days occupy: leading-blank cells + days-in-month, divided
+ * by 7 (rounded up). */
+function monthRowCount(year: number, monthIndex: number): number {
+  const firstDayOfWeek = new Date(year, monthIndex, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  return Math.ceil((firstDayOfWeek + daysInMonth) / 7);
+}
+
+function monthGridHeightFor(year: number, monthIndex: number): number {
+  return CAL_HEADER_HEIGHT + monthRowCount(year, monthIndex) * CAL_ROW_HEIGHT + CAL_BOTTOM_BUFFER;
+}
 
 type MonthState = { year: number; monthIndex: number };
 
@@ -160,14 +174,20 @@ export default function CalendarScreen() {
   // the full month grid. The wrapper expands/collapses over ~240ms,
   // revealing/hiding the inner content under `overflow: hidden`. Single
   // layer at a time keeps tests simple (only one of the two is in the
-  // tree at any moment).
-  const heightAnim = useSharedValue(monthVisible ? MONTH_GRID_HEIGHT : WEEK_STRIP_HEIGHT);
+  // tree at any moment). The expanded-state height is computed
+  // per-month so 4-row and 5-row months don't leave empty space below
+  // the grid.
+  const expandedHeight = useMemo(
+    () => monthGridHeightFor(month.year, month.monthIndex),
+    [month.year, month.monthIndex],
+  );
+  const heightAnim = useSharedValue(monthVisible ? expandedHeight : WEEK_STRIP_HEIGHT);
   useEffect(() => {
-    heightAnim.value = withTiming(monthVisible ? MONTH_GRID_HEIGHT : WEEK_STRIP_HEIGHT, {
+    heightAnim.value = withTiming(monthVisible ? expandedHeight : WEEK_STRIP_HEIGHT, {
       duration: 240,
       easing: Easing.out(Easing.cubic),
     });
-  }, [monthVisible, heightAnim]);
+  }, [monthVisible, expandedHeight, heightAnim]);
   const monthWrapperStyle = useAnimatedStyle(() => ({
     height: heightAnim.value,
   }));
@@ -214,12 +234,8 @@ export default function CalendarScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header: chevron toggle on the left, month label next to it. */}
+      {/* Header: month label on the left, chevron toggle on the right. */}
       <View style={styles.headerRow}>
-        <MonthToggleChevron
-          expanded={monthVisible}
-          onPress={() => setMonthVisible((v) => !v)}
-        />
         <Text style={styles.monthLabel} testID="month-label">
           {/* Tracks the *visible* month (`month` state), not the
               selected day's month — when the user pages the grid into
@@ -227,6 +243,10 @@ export default function CalendarScreen() {
               boundary, the label follows. */}
           {formatMonthLabel(monthInitial, initial.today.getFullYear())}
         </Text>
+        <MonthToggleChevron
+          expanded={monthVisible}
+          onPress={() => setMonthVisible((v) => !v)}
+        />
       </View>
 
       {/* Single-layer toggle with an animated height. When the user
