@@ -36,11 +36,12 @@ import { toast } from '../../lib/toast';
 
 const SELECTED_BG = '#111';
 const WEEK_STRIP_HEIGHT = 70;
-// Fits 6 rows of day cells (~46px each) + the weekday header row
-// (~30px). The CalendarList's per-month header is hidden, so we don't
-// need padding for that. Tightened from 360 → 300 to remove the empty
-// space that used to appear below the grid.
-const MONTH_GRID_HEIGHT = 300;
+// Fits the worst-case 6-row month (e.g. May 2026 — May 1 is a Friday,
+// May 31 is a Sunday, so the grid spans 6 week rows) plus the weekday
+// header row + a hairline of breathing room before the divider. Less
+// than ~340 and the bottom row gets clipped right where the divider
+// is, hiding days like the 31st.
+const MONTH_GRID_HEIGHT = 340;
 
 type MonthState = { year: number; monthIndex: number };
 
@@ -321,10 +322,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   headerRow: {
     flexDirection: 'row',
-    // 'baseline' aligns the bottom of the chevron's bounding box with
-    // the bottom of the text — i.e. the chevron's pointing tip lines
-    // up with the text baseline.
-    alignItems: 'baseline',
+    // 'center' + the chevron's own translateY nudge gives a more
+    // predictable alignment than 'baseline', which behaved oddly with
+    // the non-letter `⌄` glyph.
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 4,

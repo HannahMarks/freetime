@@ -119,13 +119,19 @@ export function DayTimeline({
         showsVerticalScrollIndicator
         refreshControl={refreshControl}
       >
-        {/* Hour gridlines + labels */}
+        {/* Hour gridlines + labels. The midnight (12 AM) label is
+            suppressed — it's redundant at the very top of the
+            timeline and visually cramps against the divider above. */}
         {Array.from({ length: 24 }).map((_, hour) => (
           <View
             key={hour}
             style={[styles.hourRow, { top: hour * HOUR_HEIGHT, height: HOUR_HEIGHT }]}
           >
-            <Text style={styles.hourLabel}>{formatHour(hour)}</Text>
+            {hour === 0 ? (
+              <View style={styles.hourLabelSpacer} />
+            ) : (
+              <Text style={styles.hourLabel}>{formatHour(hour)}</Text>
+            )}
             <View style={styles.hourLine} />
           </View>
         ))}
@@ -321,6 +327,9 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     fontSize: 11,
     color: '#888',
+  },
+  hourLabelSpacer: {
+    width: HOUR_LABEL_WIDTH,
   },
   hourLine: {
     flex: 1,
