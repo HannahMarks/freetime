@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useAuth } from '../../lib/auth';
 
 /** Append a 2-hex-digit alpha to a "#RRGGBB" hex string.
@@ -20,11 +20,85 @@ function hexAlpha(hex: string, alpha: number): string {
  * tab-bar inactive style. */
 const FALLBACK_TINT = '#888888';
 
+/**
+ * Manual-drawn calendar icon — monochrome (black + white). The previous
+ * 📅 Unicode emoji rendered as a colorful glyph that didn't match the
+ * monochrome aesthetic of the rest of the app. Composing the icon from
+ * Views means we get exactly the look we want, identical across iOS /
+ * Android, and the color is controllable per-state via props.
+ *
+ * Layout: a rounded outer rectangle (the pad), a darker top header
+ * strip (the date title bar), and two small bars sticking up from the
+ * top edge (the binder rings).
+ */
+function CalendarIcon({ color }: { color: string }) {
+  return (
+    <View style={iconStyles.container}>
+      <View style={[iconStyles.ringLeft, { backgroundColor: color }]} />
+      <View style={[iconStyles.ringRight, { backgroundColor: color }]} />
+      <View style={[iconStyles.body, { borderColor: color }]}>
+        <View style={[iconStyles.header, { backgroundColor: color }]} />
+      </View>
+    </View>
+  );
+}
+
+const iconStyles = StyleSheet.create({
+  // Outer wrapper holds enough vertical room for the rings to extend
+  // ABOVE the calendar body without being clipped (the body is 22 tall
+  // and starts 4px down to make room for the rings).
+  container: {
+    width: 24,
+    height: 26,
+    position: 'relative',
+  },
+  // The pad — outer rectangle with 1.75px stroke.
+  body: {
+    position: 'absolute',
+    top: 4,
+    left: 0,
+    width: 24,
+    height: 22,
+    borderWidth: 1.75,
+    borderRadius: 3,
+    backgroundColor: 'transparent',
+  },
+  // Solid top strip representing the calendar's header ("MAY" etc).
+  // Sits flush against the inside-top of the body's border.
+  header: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+  },
+  // The two binder rings — small vertical bars protruding above the
+  // body's top edge. Positioned at ~1/3 and 2/3 of the body's width.
+  ringLeft: {
+    position: 'absolute',
+    top: 0,
+    left: 6,
+    width: 2,
+    height: 5,
+    borderRadius: 1,
+  },
+  ringRight: {
+    position: 'absolute',
+    top: 0,
+    right: 6,
+    width: 2,
+    height: 5,
+    borderRadius: 1,
+  },
+});
+
 export default function AppTabsLayout() {
   // Profile color is the user's chosen hex from sign-up. Used to tint
-  // the calendar tab's background pill when the tab is focused so the
+  // the calendar tab's BACKGROUND PILL when the tab is focused so the
   // active state visually matches the user's events on the calendar
-  // grid (which are also drawn in their color).
+  // grid (which are also drawn in their color). The icon itself stays
+  // black-and-white per request — the user color only appears as the
+  // pill backdrop.
   const { profile } = useAuth();
   const userColor = profile?.color ?? FALLBACK_TINT;
 
@@ -39,22 +113,13 @@ export default function AppTabsLayout() {
               style={[
                 styles.iconPill,
                 {
-                  // When focused, fill the pill with the user's color
-                  // (low alpha so the emoji on top stays readable).
-                  // When unfocused, transparent — the emoji sits on the
-                  // tab bar's background unchanged.
                   backgroundColor: focused
                     ? hexAlpha(userColor, 0.28)
                     : 'transparent',
                 },
               ]}
             >
-              {/* 📅 (TEAR-OFF CALENDAR, U+1F4C5) — pure emoji
-                  presentation. Default colorful glyph; the user-color
-                  highlight comes from the pill background, not from
-                  tinting the emoji (which Text doesn't support for
-                  emoji glyphs). */}
-              <Text style={styles.iconEmoji}>📅</Text>
+              <CalendarIcon color={focused ? '#111' : '#888'} />
             </View>
           ),
         }}
@@ -67,14 +132,10 @@ export default function AppTabsLayout() {
 
 const styles = StyleSheet.create({
   iconPill: {
-    width: 36,
-    height: 30,
+    width: 40,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 14,
-  },
-  iconEmoji: {
-    fontSize: 20,
-    lineHeight: 22,
   },
 });

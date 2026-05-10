@@ -29,19 +29,17 @@ export const monthHeaderLineHeight = 28;
  * previous 28° angle left a visible gap between the arm tips, so
  * the V never properly closed.
  */
-// Smaller-than-18×9 + bolder than 2.25 stroke, BUT not so cramped that
-// the thick arms make the V look like a wedge — that's what went wrong
-// at 14×7 / 3.0 (arm thickness was 43% of arm length, so the arms read
-// as a stubby triangle rather than two distinct lines forming a V).
-//
-// 16×8 / 2.75 keeps the working 18×9 shape's proportions (thickness
-// ratio drops to ~28% — comparable to the 25% of the original) while
-// being noticeably smaller AND noticeably bolder. ARM_WIDTH stays
-// CHEVRON_HEIGHT × 1.25 so the arms still meet exactly at the
-// bottom-center vertex (`2 sin θ = 1 + cos θ` at θ=53.13°).
+// 16×8 with a 2.75 stroke. ARM_WIDTH is slightly OVERSIZED beyond the
+// strict math — `ARM_WIDTH = HEIGHT × 1.25 = 10` would make the arms
+// exactly meet at the bottom-center vertex IF the arms had
+// infinitely-thin tips, but with thickness 2.75 (and previously rounded
+// borderRadius caps), the arm tips sat shy of the vertex and left a
+// visible gap. Bumping ARM_WIDTH 10 → 11 lets the arms overlap by
+// ~1px at the vertex, fully closing the V. Sharp (square) ends
+// instead of rounded keep the join clean.
 const CHEVRON_WIDTH = 16;
 const CHEVRON_HEIGHT = 8;
-const ARM_WIDTH = 10;
+const ARM_WIDTH = 11;
 const ARM_THICKNESS = 2.75;
 const ARM_TILT_DEG = 53;
 /** Default chevron color — matches the calendar header's text. The
@@ -117,7 +115,9 @@ const styles = StyleSheet.create({
     height: ARM_THICKNESS,
     // backgroundColor is set inline from the `color` prop so the chevron
     // can match the calendar's text color.
-    borderRadius: ARM_THICKNESS / 2,
+    // No borderRadius: rounded caps were curving back and leaving a
+    // visible gap at the vertex where the two arms meet. Square tips
+    // close the V cleanly.
     // Vertically center the bars before rotation, so rotating around
     // each bar's geometric center makes them swing symmetrically into
     // a V (or Λ when the parent is rotated 180°).
