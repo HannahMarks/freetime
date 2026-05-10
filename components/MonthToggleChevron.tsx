@@ -29,22 +29,32 @@ export const monthHeaderLineHeight = 28;
  * previous 28° angle left a visible gap between the arm tips, so
  * the V never properly closed.
  */
-// Smaller + bolder. The 18×9 / 2.25 stroke version was the right shape
-// but read as too dainty next to the bold month label. Shrunk to 14×7
-// (78% of the previous width) and the stroke bumped to 3 — same V, but
-// reads as a confident bold glyph instead of a pencil-line outline.
-// ARM_WIDTH = CHEVRON_HEIGHT × 1.25 must hold for arms to meet at the
-// bottom-center vertex.
-const CHEVRON_WIDTH = 14;
-const CHEVRON_HEIGHT = 7;
-const ARM_WIDTH = 8.75;
-const ARM_THICKNESS = 3;
+// Smaller-than-18×9 + bolder than 2.25 stroke, BUT not so cramped that
+// the thick arms make the V look like a wedge — that's what went wrong
+// at 14×7 / 3.0 (arm thickness was 43% of arm length, so the arms read
+// as a stubby triangle rather than two distinct lines forming a V).
+//
+// 16×8 / 2.75 keeps the working 18×9 shape's proportions (thickness
+// ratio drops to ~28% — comparable to the 25% of the original) while
+// being noticeably smaller AND noticeably bolder. ARM_WIDTH stays
+// CHEVRON_HEIGHT × 1.25 so the arms still meet exactly at the
+// bottom-center vertex (`2 sin θ = 1 + cos θ` at θ=53.13°).
+const CHEVRON_WIDTH = 16;
+const CHEVRON_HEIGHT = 8;
+const ARM_WIDTH = 10;
+const ARM_THICKNESS = 2.75;
 const ARM_TILT_DEG = 53;
+/** Default chevron color — matches the calendar header's text. The
+ * `color` prop overrides for callers that want a different tint. */
+const DEFAULT_CHEVRON_COLOR = '#111';
 
 type Props = {
   /** True when the month grid is expanded (chevron points up). */
   expanded: boolean;
   onPress: () => void;
+  /** Color of the V's arms. Defaults to `#111` so the chevron matches
+   * the calendar's heavy-weight month label sitting next to it. */
+  color?: string;
 };
 
 /**
@@ -53,7 +63,7 @@ type Props = {
  * 0° → 180° flips it to a Λ. Container is sized via constants so the
  * chevron's exact width/height are predictable.
  */
-export function MonthToggleChevron({ expanded, onPress }: Props) {
+export function MonthToggleChevron({ expanded, onPress, color = DEFAULT_CHEVRON_COLOR }: Props) {
   const rotation = useSharedValue(expanded ? 180 : 0);
 
   useEffect(() => {
@@ -77,8 +87,8 @@ export function MonthToggleChevron({ expanded, onPress }: Props) {
       style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
     >
       <Animated.View style={[styles.chevronBox, animatedStyle]}>
-        <View style={[styles.arm, styles.armLeft]} />
-        <View style={[styles.arm, styles.armRight]} />
+        <View style={[styles.arm, styles.armLeft, { backgroundColor: color }]} />
+        <View style={[styles.arm, styles.armRight, { backgroundColor: color }]} />
       </Animated.View>
     </Pressable>
   );
@@ -105,7 +115,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: ARM_WIDTH,
     height: ARM_THICKNESS,
-    backgroundColor: '#444',
+    // backgroundColor is set inline from the `color` prop so the chevron
+    // can match the calendar's text color.
     borderRadius: ARM_THICKNESS / 2,
     // Vertically center the bars before rotation, so rotating around
     // each bar's geometric center makes them swing symmetrically into

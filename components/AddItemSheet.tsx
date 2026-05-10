@@ -170,19 +170,18 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   useEffect(() => {
     if (visible) {
       setRendered(true);
-      // Slide-up + zoom-in. Scale uses a noticeably bouncier spring so
-      // the sheet visibly overshoots a touch before settling — that
-      // overshoot is what reads as the "zoom in" the user wants. The
-      // translation spring is more critically damped so the sheet
-      // doesn't bob vertically on land.
+      // Slide-up + zoom-in. BOTH springs are critically damped now
+      // (no overshoot) — the user reported the bouncy version felt
+      // wrong on landing. The 0.7 → 1 scale + slide-up still reads as
+      // a clear bloom, just without the wobble at the end.
       translateY.value = withSpring(0, {
-        damping: 22,
+        damping: 24,
         stiffness: 220,
         mass: 0.9,
       });
       scale.value = withSpring(1, {
-        damping: 12,
-        stiffness: 200,
+        damping: 22,
+        stiffness: 220,
         mass: 0.9,
       });
       backdropOpacity.value = withTiming(0.4, {
@@ -492,14 +491,14 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                     pressed && styles.headerIconButtonPressed,
                   ]}
                 >
-                  {/* Pencil emoji (U+270F + VS-16 emoji presentation).
-                      The earlier hand-drawn two-bar version did not read
-                      as a pencil; the system emoji is universally
-                      recognized, even if it's a colorful glyph next to
-                      the monochrome ⋯. Sized + line-height-tuned so the
-                      glyph sits visually centered in the 36×36 button. */}
+                  {/* Pencil glyph U+270F with VS-15 (text-presentation
+                      selector U+FE0E) — forces the system to render it
+                      as a black/text glyph instead of the colorful emoji
+                      it would default to with VS-16. Combined with
+                      `color: '#111'` on the Text, this matches the
+                      monochrome ⋯ icon and the rest of the sheet. */}
                   <Text style={styles.pencilEmoji} accessibilityElementsHidden>
-                    ✏️
+                    {'✏︎'}
                   </Text>
                 </Pressable>
               ) : null}
@@ -738,7 +737,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    // Now that the sheet is full-screen and SafeAreaView only insets the
+    // status-bar area, the close button and heading were sitting right
+    // at the top of the safe area — felt cramped against the notch /
+    // status text. Extra top padding pushes them visibly down.
+    paddingTop: 28,
+    paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#eee',
   },
@@ -771,6 +775,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 22,
     textAlign: 'center',
+    // Explicit dark color: combined with the U+FE0E text-presentation
+    // selector on the glyph, this keeps the pencil monochrome instead
+    // of falling back to the colorful emoji presentation.
+    color: '#111',
   },
   body: {
     paddingHorizontal: 20,
