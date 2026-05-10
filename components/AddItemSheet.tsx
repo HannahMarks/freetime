@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
   runOnJS,
@@ -164,6 +165,34 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     opacity: backdropOpacity.value,
   }));
 
+  // Swipe-down to dismiss. Activates only after a clearly downward
+  // drag (>20px), and fails on horizontal motion >30px so it doesn't
+  // hijack scrolls / drags inside the sheet content. On release past
+  // a threshold (~25% of screen height OR a fast flick), call onClose
+  // — the existing `visible` effect plays the exit animation. Below
+  // threshold: spring back to 0.
+  const dismissPan = Gesture.Pan()
+    .activeOffsetY([-9999, 20])
+    .failOffsetX([-30, 30])
+    .onUpdate((e) => {
+      // Track downward drag only. Subtle resistance for over-pull
+      // by halving the translation past the dismiss threshold.
+      translateY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      const shouldDismiss =
+        e.translationY > SCREEN_HEIGHT * 0.25 || e.velocityY > 600;
+      if (shouldDismiss) {
+        runOnJS(onClose)();
+      } else {
+        translateY.value = withSpring(0, {
+          damping: 22,
+          stiffness: 240,
+          mass: 0.8,
+        });
+      }
+    });
+
   // Reset whenever the sheet (re-)opens or the editing target changes.
   useEffect(() => {
     if (visible) {
@@ -284,8 +313,12 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           accessibilityLabel="Dismiss backdrop"
         />
       </Animated.View>
-      {/* Sheet slides up from below via spring. */}
-      <Animated.View style={[styles.sheet, sheetStyle]}>
+      {/* Sheet slides up from below via spring. Wrapped in a
+          GestureDetector so the user can swipe it down to dismiss
+          (Pan only activates on a clearly downward drag — vertical
+          scroll inside the form is unaffected by smaller motions). */}
+      <GestureDetector gesture={dismissPan}>
+      <Animated.View style={[styles.sheet, sheetStyle]} collapsable={false}>
         <SafeAreaView style={styles.container} testID="add-item-sheet">
         <View style={styles.header}>
           <Pressable
@@ -439,6 +472,7 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
         </View>
       </SafeAreaView>
       </Animated.View>
+      </GestureDetector>
     </Modal>
   );
 }
