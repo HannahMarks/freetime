@@ -15,6 +15,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { AddItemSheet } from '../../components/AddItemSheet';
+import { EventSheet } from '../../components/EventSheet';
+import { EVENT_DARKEN_AMOUNT, FabMultiAction } from '../../components/FabMultiAction';
 import {
   MonthToggleChevron,
   monthHeaderFontSize,
@@ -28,10 +30,16 @@ import { listCalendarItems } from '../../lib/calendar-actions';
 import {
   BusyBlockItem,
   CalendarItem,
+  FriendProfile,
+  computeEventMarkings,
   computeMarkings,
   isoDate,
+  mergeMarkings,
   monthRange,
 } from '../../lib/calendar-helpers';
+import { listEvents } from '../../lib/event-actions';
+import type { EventItem } from '../../lib/event-helpers';
+import { listFriendships } from '../../lib/friend-actions';
 import { toast } from '../../lib/toast';
 
 const SELECTED_BG = '#111';
@@ -87,6 +95,19 @@ export default function CalendarScreen() {
   const [month, setMonth] = useState<MonthState>(initial.monthState);
   const [selectedDate, setSelectedDate] = useState<string>(initial.todayIso);
   const [items, setItems] = useState<CalendarItem[]>([]);
+  // Events that overlap the visible month window. Rendered as a dot
+  // in `darken(profile.color, EVENT_DARKEN_AMOUNT)` on the month
+  // grid, matching the Events sub-FAB outline. Day-timeline rendering
+  // of events is deferred to H5c — for now events show as a
+  // calendar-grid signal that says "tap to see what's planned on
+  // the Events tab".
+  const [events, setEvents] = useState<EventItem[]>([]);
+  // Accepted friends fetched once on mount — wired into the
+  // EventSheet's invite picker. The events tab fetches this
+  // separately for itself; we duplicate the call here so the
+  // calendar tab's EventSheet has the list ready as soon as it
+  // opens (without needing to round-trip when the user taps).
+  const [friends, setFriends] = useState<FriendProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // Month grid is hidden by default — the week strip below is the
@@ -94,27 +115,50 @@ export default function CalendarScreen() {
   const [monthVisible, setMonthVisible] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarItem | null>(null);
+  const [eventSheetOpen, setEventSheetOpen] = useState(false);
 
   const fetchMonth = useCallback(async () => {
     const { fromDate, toDate } = monthRange(month.year, month.monthIndex);
-    const { data, error } = await listCalendarItems({ fromDate, toDate });
-    if (error) {
-      toast.error(error);
-      return;
+    // Fetch busy / unavailable rows and events in parallel — they're
+    // independent queries (different tables, both RLS-filtered to
+    // the visible set) so paying for two round-trips at once is
+    // strictly better than serialising.
+    const [calRes, evRes] = await Promise.all([
+      listCalendarItems({ fromDate, toDate }),
+      listEvents({ fromDate, toDate }),
+    ]);
+    if (calRes.error) {
+      toast.error(calRes.error);
+    } else if (calRes.data) {
+      setItems(calRes.data);
     }
-    if (data) setItems(data);
+    if (evRes.error) {
+      // Don't shadow a calendar-items error with the events one — the
+      // calendar items are the primary surface; events failing only
+      // hides the dot accent. Log + toast best-effort.
+      toast.error(evRes.error);
+    } else if (evRes.data) {
+      setEvents(evRes.data);
+    }
   }, [month]);
+
+  const fetchFriends = useCallback(async () => {
+    if (!session?.user.id) return;
+    const { data, error } = await listFriendships(session.user.id);
+    if (error) return; // silent — friends are a secondary concern here
+    if (data) setFriends(data.friends.map((f) => f.friend));
+  }, [session?.user.id]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchMonth().finally(() => {
+    Promise.all([fetchMonth(), fetchFriends()]).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [fetchMonth]);
+  }, [fetchMonth, fetchFriends]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -171,19 +215,6 @@ export default function CalendarScreen() {
     setEditing(null);
   }
 
-  // FAB icon rotates 45° as the sheet opens (the "+" morphs into an "×"
-  // visually). Reverses on close.
-  const fabRotation = useSharedValue(0);
-  useEffect(() => {
-    fabRotation.value = withTiming(addOpen ? 45 : 0, {
-      duration: 200,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [addOpen, fabRotation]);
-  const fabIconStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${fabRotation.value}deg` }],
-  }));
-
   // Animated height for the toggle between the compact week strip and
   // the full month grid. The wrapper expands/collapses over ~240ms,
   // revealing/hiding the inner content under `overflow: hidden`. Single
@@ -221,7 +252,22 @@ export default function CalendarScreen() {
     [month.year, month.monthIndex],
   );
 
-  const dotMarkings = useMemo(() => computeMarkings(items), [items]);
+  // Two passes:
+  //   1. Friend dots (busy_blocks + unavailable_days) keyed by user id
+  //   2. Event dots keyed by the literal string 'events', in
+  //      darken(profile.color, EVENT_DARKEN_AMOUNT)
+  // mergeMarkings concatenates per-day dot arrays so a day with both
+  // a friend's busy_block AND an event the viewer is on renders both
+  // dots side-by-side in the calendar grid's multi-dot row.
+  const friendDotMarkings = useMemo(() => computeMarkings(items), [items]);
+  const eventDotMarkings = useMemo(
+    () => computeEventMarkings(events, profile?.color, EVENT_DARKEN_AMOUNT),
+    [events, profile?.color],
+  );
+  const dotMarkings = useMemo(
+    () => mergeMarkings(friendDotMarkings, eventDotMarkings),
+    [friendDotMarkings, eventDotMarkings],
+  );
 
   const markedDates = useMemo(() => {
     const merged: Record<
@@ -332,28 +378,30 @@ export default function CalendarScreen() {
         />
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Add to calendar"
-        testID="add-fab"
-        onPress={() => {
+      <FabMultiAction
+        color={profile?.color}
+        onPressBusy={() => {
           setEditing(null);
           setAddOpen(true);
         }}
-        style={({ pressed }) => [
-          styles.fab,
-          { backgroundColor: profile?.color ?? SELECTED_BG },
-          pressed && styles.fabPressed,
-        ]}
-      >
-        <Animated.Text style={[styles.fabIcon, fabIconStyle]}>+</Animated.Text>
-      </Pressable>
+        onPressEvent={() => setEventSheetOpen(true)}
+      />
 
       <AddItemSheet
         visible={addOpen}
         selectedDate={selectedDate}
         editing={editing}
         onClose={closeAddSheet}
+        onSaved={fetchMonth}
+      />
+
+      <EventSheet
+        visible={eventSheetOpen}
+        defaultDate={selectedDate}
+        editing={null}
+        friends={friends}
+        currentUserId={session?.user.id}
+        onClose={() => setEventSheetOpen(false)}
         onSaved={fetchMonth}
       />
     </View>
@@ -391,21 +439,4 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e5e5e5',
   },
   loadingRow: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  fabPressed: { opacity: 0.85 },
-  fabIcon: { color: '#fff', fontSize: 30, lineHeight: 32, fontWeight: '300' },
 });

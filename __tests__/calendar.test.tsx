@@ -3,6 +3,8 @@ import { Alert } from 'react-native';
 import CalendarScreen from '../app/(app)/calendar';
 import { deleteBusyBlock } from '../lib/availability-actions';
 import { listCalendarItems } from '../lib/calendar-actions';
+import { listEvents } from '../lib/event-actions';
+import { listFriendships } from '../lib/friend-actions';
 import { toast } from '../lib/toast';
 
 jest.mock('../lib/calendar-actions', () => ({
@@ -12,6 +14,22 @@ jest.mock('../lib/calendar-actions', () => ({
 jest.mock('../lib/availability-actions', () => ({
   deleteBusyBlock: jest.fn(),
   deleteUnavailableDay: jest.fn(),
+}));
+
+jest.mock('../lib/event-actions', () => ({
+  listEvents: jest.fn(),
+  // Stubs for actions EventSheet may invoke when opened — keep mocks
+  // returning the standard shape so a stray call inside a test
+  // doesn't crash with `Cannot read properties of undefined`.
+  createEvent: jest.fn().mockResolvedValue({ id: null, error: null }),
+  updateEvent: jest.fn().mockResolvedValue({ error: null }),
+  deleteEvent: jest.fn().mockResolvedValue({ error: null }),
+  inviteFriends: jest.fn().mockResolvedValue({ error: null }),
+  respondToInvite: jest.fn().mockResolvedValue({ error: null }),
+}));
+
+jest.mock('../lib/friend-actions', () => ({
+  listFriendships: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -93,6 +111,8 @@ jest.mock('../components/SwipeableWeekStrip', () => {
 
 const mockedList = listCalendarItems as jest.MockedFunction<typeof listCalendarItems>;
 const mockedDeleteBusy = deleteBusyBlock as jest.MockedFunction<typeof deleteBusyBlock>;
+const mockedListEvents = listEvents as jest.MockedFunction<typeof listEvents>;
+const mockedListFriendships = listFriendships as jest.MockedFunction<typeof listFriendships>;
 
 const me = { id: 'me-id', display_name: 'Me', color: '#888888' };
 
@@ -102,6 +122,13 @@ const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
 beforeEach(() => {
   jest.clearAllMocks();
   lastCalendarProps = {};
+  // Default event + friend stubs so tests that don't care about
+  // events still mount cleanly. Override in specific tests as needed.
+  mockedListEvents.mockResolvedValue({ data: [], error: null });
+  mockedListFriendships.mockResolvedValue({
+    data: { incoming: [], outgoing: [], friends: [] },
+    error: null,
+  });
   jest.useFakeTimers().setSystemTime(new Date(2026, 4, 13, 9, 0));
 });
 
@@ -291,6 +318,41 @@ describe('CalendarScreen', () => {
     );
   });
 
+  it("emits a darker user-color dot on days the viewer has an event", async () => {
+    mockedList.mockResolvedValue({ data: [], error: null });
+    mockedListEvents.mockResolvedValue({
+      data: [
+        {
+          kind: 'event',
+          id: 'ev1',
+          owner: { id: 'me-id', display_name: 'Me', color: '#9C27B0' },
+          startsAt: new Date(2026, 4, 14, 18, 0),
+          endsAt: new Date(2026, 4, 14, 20, 0),
+          title: 'Birthday',
+          notes: null,
+          location: null,
+        },
+      ],
+      error: null,
+    });
+    render(<CalendarScreen />);
+    await flushAsync();
+    showGrid();
+
+    // Viewer color is #9C27B0; darkened by EVENT_DARKEN_AMOUNT (0.35)
+    // gives the dot color. We assert the dot is present + has the
+    // "events" key (so it doesn't collide with a friend's user-id key).
+    const may14 = (lastCalendarProps.markedDates as {
+      [k: string]: { dots?: { key: string; color: string }[] };
+    })['2026-05-14'];
+    const eventDot = may14.dots?.find((d) => d.key === 'events');
+    expect(eventDot).toBeDefined();
+    // The exact hex math is verified in color-helpers.test; here we
+    // just confirm it differs from the un-darkened profile color so
+    // future regressions where the darken step is skipped get caught.
+    expect(eventDot!.color.toLowerCase()).not.toBe('#9c27b0');
+  });
+
   it("changes the selected day and re-renders the timeline when onDayPress fires", async () => {
     mockedList.mockResolvedValue({
       data: [
@@ -466,14 +528,17 @@ describe('CalendarScreen', () => {
   });
 
   describe('add + delete flows', () => {
-    it('opens the add sheet when the FAB is pressed and dismisses on Close', async () => {
+    it('opens the add sheet via the FAB → Busy sub-FAB and dismisses on Close', async () => {
       mockedList.mockResolvedValue({ data: [], error: null });
       render(<CalendarScreen />);
       await flushAsync();
 
       expect(screen.queryByTestId('add-item-sheet')).toBeNull();
 
-      fireEvent.press(screen.getByTestId('add-fab'));
+      // Multi-action FAB: primary toggles the sub-FABs; the Busy
+      // sub-FAB is what opens the AddItemSheet now.
+      fireEvent.press(screen.getByTestId('fab-primary'));
+      fireEvent.press(screen.getByTestId('fab-action-busy'));
       expect(screen.getByTestId('add-item-sheet')).toBeOnTheScreen();
 
       fireEvent.press(screen.getByLabelText('Close'));
@@ -485,9 +550,24 @@ describe('CalendarScreen', () => {
       render(<CalendarScreen />);
       await flushAsync();
 
-      const fab = screen.getByTestId('add-fab');
+      const fab = screen.getByTestId('fab-primary');
       // Profile color from the useAuth mock above.
       expect(fab).toHaveStyle({ backgroundColor: '#9C27B0' });
+    });
+
+    it('opens the EventSheet via the FAB → Event sub-FAB and dismisses on Close', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      expect(screen.queryByTestId('event-sheet')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('fab-primary'));
+      fireEvent.press(screen.getByTestId('fab-action-event'));
+      expect(screen.getByTestId('event-sheet')).toBeOnTheScreen();
+
+      fireEvent.press(screen.getByLabelText('Close'));
+      await waitFor(() => expect(screen.queryByTestId('event-sheet')).toBeNull());
     });
 
     it("opens the sheet in view mode when the user taps their own item (no action sheet)", async () => {

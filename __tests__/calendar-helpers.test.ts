@@ -3,6 +3,7 @@ import {
   BusyBlockItem,
   CalendarItem,
   combineDateAndTime,
+  computeEventMarkings,
   computeMarkings,
   formatDayLabel,
   formatTimeRange,
@@ -15,6 +16,7 @@ import {
   shiftDate,
   snapMinutes,
 } from '../lib/calendar-helpers';
+import type { EventItem } from '../lib/event-helpers';
 
 const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
 const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
@@ -240,6 +242,74 @@ describe('computeMarkings', () => {
     const out = computeMarkings(items);
     expect(out['2026-05-13']?.dots).toEqual([{ key: 'a', color: '#FF6B6B' }]);
     expect(out['2026-05-14']).toBeUndefined();
+  });
+});
+
+describe('computeEventMarkings', () => {
+  function eventOn(date: Date, endDate: Date = date): EventItem {
+    return {
+      kind: 'event',
+      id: `e-${date.getTime()}`,
+      owner: alice,
+      startsAt: date,
+      endsAt: endDate,
+      title: 'Birthday',
+      notes: null,
+      location: null,
+    };
+  }
+
+  it("paints one dot per day in the viewer's darker color", () => {
+    const events: EventItem[] = [
+      eventOn(new Date(2026, 4, 13, 18, 0), new Date(2026, 4, 13, 21, 0)),
+    ];
+    // amount=0.5 of #808080 → #404040 (verified in color-helpers.test).
+    const out = computeEventMarkings(events, '#808080', 0.5);
+    expect(out['2026-05-13'].dots).toEqual([
+      { key: 'events', color: '#404040' },
+    ]);
+  });
+
+  it('dedupes the events dot when multiple events fall on the same day', () => {
+    const events: EventItem[] = [
+      eventOn(new Date(2026, 4, 13, 9, 0), new Date(2026, 4, 13, 10, 0)),
+      eventOn(new Date(2026, 4, 13, 18, 0), new Date(2026, 4, 13, 20, 0)),
+    ];
+    const out = computeEventMarkings(events, '#808080', 0.5);
+    expect(out['2026-05-13'].dots).toHaveLength(1);
+  });
+
+  it('spans the dot across every day a multi-day event touches', () => {
+    const events: EventItem[] = [
+      eventOn(new Date(2026, 4, 13, 18, 0), new Date(2026, 4, 15, 9, 0)),
+    ];
+    const out = computeEventMarkings(events, '#808080', 0.5);
+    expect(out['2026-05-13'].dots).toEqual([{ key: 'events', color: '#404040' }]);
+    expect(out['2026-05-14'].dots).toEqual([{ key: 'events', color: '#404040' }]);
+    expect(out['2026-05-15'].dots).toEqual([{ key: 'events', color: '#404040' }]);
+  });
+
+  it('does NOT mark the next day when an event ends exactly at midnight', () => {
+    // Mirrors the busy_block midnight cutoff in computeMarkings, so the
+    // two helpers behave consistently on edge-of-day cases.
+    const events: EventItem[] = [
+      eventOn(new Date(2026, 4, 13, 22, 0), new Date(2026, 4, 14, 0, 0)),
+    ];
+    const out = computeEventMarkings(events, '#808080', 0.5);
+    expect(out['2026-05-13']?.dots).toEqual([{ key: 'events', color: '#404040' }]);
+    expect(out['2026-05-14']).toBeUndefined();
+  });
+
+  it('returns an empty object when given no events', () => {
+    expect(computeEventMarkings([], '#808080', 0.5)).toEqual({});
+  });
+
+  it('handles a missing viewer color by falling back gracefully', () => {
+    const events: EventItem[] = [eventOn(new Date(2026, 4, 13, 18, 0))];
+    // Should NOT crash. Falls back to a non-empty color so dots still
+    // render — the screen passes `profile?.color` which can be
+    // undefined before auth resolves.
+    expect(() => computeEventMarkings(events, undefined, 0.5)).not.toThrow();
   });
 });
 
