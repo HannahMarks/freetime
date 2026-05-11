@@ -231,3 +231,26 @@ export async function inviteFriends(args: {
   if (error) return { error: describeError("Couldn't send invites", error) };
   return { error: null };
 }
+
+/**
+ * Delete invites for the given event by invitee ids. Counterpart to
+ * `inviteFriends` — used when the host removes someone from an
+ * existing event in edit mode. RLS enforces "host of the event OR
+ * invitee removing themselves" on DELETE; the host path is what
+ * this action targets.
+ *
+ * No-ops when the id list is empty (skips the round-trip).
+ */
+export async function uninviteFriends(args: {
+  eventId: string;
+  inviteeIds: string[];
+}): Promise<ActionResult> {
+  if (args.inviteeIds.length === 0) return { error: null };
+  const { error } = await supabase
+    .from('event_invites')
+    .delete()
+    .eq('event_id', args.eventId)
+    .in('invitee_id', args.inviteeIds);
+  if (error) return { error: describeError("Couldn't remove invites", error) };
+  return { error: null };
+}
