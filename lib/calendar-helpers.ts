@@ -61,6 +61,14 @@ export type UnavailableDayItem = {
    * the SERIES start (NOT the per-occurrence date). Used by edit /
    * delete actions to identify the underlying row. */
   seriesDate?: string;
+  /** When an occurrence has a `move` exception applied, this is the
+   * YYYY-MM-DD `expandOccurrences` would have emitted for this slot
+   * without the move — the `original_date` column on
+   * `unavailable_day_exceptions`. `date` carries the MOVED date the
+   * UI displays. Subsequent edits keyed by occurrence (skip-this-one,
+   * re-move) need this to find the exception row. Absent on un-moved
+   * occurrences and on one-offs. */
+  originalDate?: string;
 };
 
 export type CalendarItem = BusyBlockItem | UnavailableDayItem;

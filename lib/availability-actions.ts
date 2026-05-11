@@ -217,6 +217,44 @@ export async function skipBusyBlockOccurrence(args: {
   return { error: null };
 }
 
+/**
+ * Insert a `skip` exception for a single occurrence of a recurring
+ * unavailable_day series. The series row stays put — only this one
+ * occurrence's date is hidden from `listCalendarItems`.
+ *
+ * `seriesUserId` + `seriesDate` identify the parent row (the
+ * unavailable_days composite PK). `originalDate` is the per-occurrence
+ * YYYY-MM-DD that `expandOccurrences` would have emitted for this
+ * slot — i.e. the CalendarItem's `date` when it was an unmoved
+ * occurrence (or `originalDate` if a move was later applied).
+ *
+ * Idempotent on the (series_user_id, series_date, original_date)
+ * composite PK. Explicit-null new_date so an upsert from an existing
+ * 'move' exception on the same occurrence cleanly converts to 'skip'
+ * (the table's CHECK requires new_date IS NULL on a skip row).
+ */
+export async function skipUnavailableDayOccurrence(args: {
+  seriesUserId: string;
+  seriesDate: string; // YYYY-MM-DD
+  originalDate: string; // YYYY-MM-DD
+}): Promise<ActionResult> {
+  const { error } = await supabase
+    .from('unavailable_day_exceptions')
+    .upsert(
+      {
+        series_user_id: args.seriesUserId,
+        series_date: args.seriesDate,
+        original_date: args.originalDate,
+        action: 'skip',
+        new_date: null,
+      },
+      { onConflict: 'series_user_id,series_date,original_date' },
+    );
+
+  if (error) return { error: describeError("Couldn't skip this day", error) };
+  return { error: null };
+}
+
 export async function deleteUnavailableDay(args: {
   userId: string;
   date: string;
