@@ -132,3 +132,147 @@ describe('expandOccurrences (weekly)', () => {
     expect(out).toEqual([]);
   });
 });
+
+describe('expandOccurrences (weekly + byDay)', () => {
+  // Base is Mon May 11 2026 14:00 → 15:00. Tests vary byDay to pick
+  // different weekdays inside each week.
+  const baseStart = new Date(2026, 4, 11, 14, 0);
+  const baseEnd = new Date(2026, 4, 11, 15, 0);
+
+  it('returns one occurrence per selected weekday inside each week', () => {
+    // Mon (1) + Wed (3) + Fri (5).
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', byDay: [1, 3, 5] },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 18, 0, 0),
+    });
+    // May 11 (Mon), 13 (Wed), 15 (Fri).
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 13, 15]);
+    // All inherit the base's hour.
+    for (const o of out) {
+      expect(o.startsAt.getHours()).toBe(14);
+      expect(o.startsAt.getMinutes()).toBe(0);
+    }
+  });
+
+  it('returns occurrences in chronological order across multiple weeks', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', byDay: [1, 5] }, // Mon + Fri
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0), // 2 weeks
+    });
+    // Expect: Mon 11, Fri 15, Mon 18, Fri 22.
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 15, 18, 22]);
+  });
+
+  it('ignores days that come before the base date in week 0 (a Tue base with byDay=[Mon] should NOT include the Mon before)', () => {
+    // Base is Tue. Selecting Mon means the first matching occurrence
+    // is the FOLLOWING Monday, not the one that came before the base.
+    const tueBase = new Date(2026, 4, 12, 14, 0); // Tue May 12 2026
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', byDay: [1] }, // Mon
+      baseStart: tueBase,
+      baseEnd: new Date(2026, 4, 12, 15, 0),
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+    });
+    // Expect: Mon 18, Mon 25 (Mon 11 is BEFORE the base).
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([18]);
+  });
+
+  it('falls back to the base weekday when byDay is omitted (preserves v1 behavior)', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'weekly' }, // no byDay
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+    });
+    // Mondays only: 11, 18.
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 18]);
+  });
+
+  it('falls back to the base weekday when byDay is an empty array', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', byDay: [] },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 18]);
+  });
+});
+
+describe('expandOccurrences (until)', () => {
+  const baseStart = new Date(2026, 4, 11, 14, 0); // Mon May 11
+  const baseEnd = new Date(2026, 4, 11, 15, 0);
+
+  it('caps weekly expansion at `until` (inclusive)', () => {
+    // until = May 18 → expect occurrences on May 11 and May 18 only.
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', until: '2026-05-18' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 6, 1, 0, 0),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 18]);
+  });
+
+  it('treats `until` as an inclusive END-OF-DAY date', () => {
+    // until = May 17. May 18 starts AFTER until's end-of-day, so it's
+    // excluded. Only May 11 should be included.
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', until: '2026-05-17' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 6, 1, 0, 0),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11]);
+  });
+
+  it('combines with byDay', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', byDay: [1, 3], until: '2026-05-25' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 6, 1, 0, 0),
+    });
+    // Mon May 11, Wed May 13, Mon May 18, Wed May 20, Mon May 25.
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 13, 18, 20, 25]);
+  });
+
+  it('returns an empty array when until is before the base', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'weekly', until: '2026-04-01' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 6, 1, 0, 0),
+    });
+    expect(out).toEqual([]);
+  });
+});
+
+describe('isRecurrenceRule (extended shapes)', () => {
+  it('accepts a rule with byDay', () => {
+    expect(isRecurrenceRule({ freq: 'weekly', byDay: [1, 3] })).toBe(true);
+  });
+
+  it('accepts a rule with until', () => {
+    expect(isRecurrenceRule({ freq: 'weekly', until: '2026-12-31' })).toBe(true);
+  });
+
+  it('accepts a rule with both byDay and until', () => {
+    expect(
+      isRecurrenceRule({ freq: 'weekly', byDay: [1, 3, 5], until: '2026-12-31' }),
+    ).toBe(true);
+  });
+});

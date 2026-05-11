@@ -714,17 +714,22 @@ describe('AddItemSheet', () => {
   });
 
   describe('weekly recurrence', () => {
-    it('passes recurrenceRule = { freq: "weekly" } when the toggle is on at create-time', async () => {
+    it('passes recurrenceRule with byDay auto-seeded to the base weekday when the toggle is on at create-time', async () => {
       mockedCreateBusy.mockResolvedValue({ error: null });
       render(<AddItemSheet {...baseProps} />);
 
       // Toggle on, then save — busy mode (default), default times.
+      // selectedDate '2026-05-13' is a Wednesday → getDay() === 3, so
+      // toggling on should auto-pre-select the Wed chip and the saved
+      // rule carries `byDay: [3]`. (Auto-seeding makes the chip row
+      // not look empty; without it the user would think nothing was
+      // selected even though the helper falls back to the base weekday.)
       fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
       fireEvent.press(screen.getByLabelText('Save'));
 
       await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
       const call = mockedCreateBusy.mock.calls[0][0];
-      expect(call.recurrenceRule).toEqual({ freq: 'weekly' });
+      expect(call.recurrenceRule).toEqual({ freq: 'weekly', byDay: [3] });
     });
 
     it('omits recurrenceRule when the toggle is off (default)', async () => {
@@ -744,7 +749,45 @@ describe('AddItemSheet', () => {
       expect(screen.queryByTestId('repeat-weekly-toggle')).toBeNull();
     });
 
-    it('view mode shows a "Repeats weekly" line for a recurring item', () => {
+    it('view mode shows the recurrence line with the base weekday when byDay is omitted', () => {
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0), // Mon May 11
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      // Base is a Monday → summary should call out Monday.
+      expect(screen.getByTestId('view-recurrence').props.children).toMatch(
+        /Weekly on Monday/i,
+      );
+    });
+
+    it('view mode lists multiple selected weekdays from byDay', () => {
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Standup',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly', byDay: [1, 3, 5] }, // Mon Wed Fri
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      const text = screen.getByTestId('view-recurrence').props.children as string;
+      expect(text).toMatch(/Mon/);
+      expect(text).toMatch(/Wed/);
+      expect(text).toMatch(/Fri/);
+    });
+
+    it('view mode appends the until-date when set', () => {
       const editing: CalendarItem = {
         kind: 'busy_block',
         id: 'series1',
@@ -754,10 +797,12 @@ describe('AddItemSheet', () => {
         title: 'Yoga',
         notes: null,
         location: null,
-        recurrenceRule: { freq: 'weekly' },
+        recurrenceRule: { freq: 'weekly', until: '2026-12-31' },
       };
       render(<AddItemSheet {...baseProps} editing={editing} />);
-      expect(screen.getByTestId('view-recurrence').props.children).toMatch(/repeats weekly/i);
+      const text = screen.getByTestId('view-recurrence').props.children as string;
+      expect(text).toMatch(/until/i);
+      expect(text).toMatch(/Dec 31, 2026/);
     });
 
     it('view mode does NOT show a recurrence line for a one-off item', () => {
@@ -797,6 +842,68 @@ describe('AddItemSheet', () => {
 
       await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalled());
       expect(mockedUpdateBusy.mock.calls[0][0].recurrenceRule).toEqual({ freq: 'weekly' });
+    });
+
+    it('toggling off the day-of-base chip and on a different day passes byDay in the saved rule', async () => {
+      // Default `selectedDate` = '2026-05-13' (Wed). Toggling Repeat
+      // on auto-seeds byDay = [3] (Wed). Tap Mon (1) to add it, then
+      // Wed (3) to remove it → byDay = [1] (Mon only).
+      mockedCreateBusy.mockResolvedValue({ error: null });
+      render(<AddItemSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+      fireEvent.press(screen.getByTestId('byday-1')); // add Mon
+      fireEvent.press(screen.getByTestId('byday-3')); // remove Wed
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+      expect(mockedCreateBusy.mock.calls[0][0].recurrenceRule).toEqual({
+        freq: 'weekly',
+        byDay: [1],
+      });
+    });
+
+    it('saving with the until-toggle on includes `until` in the rule', async () => {
+      mockedCreateBusy.mockResolvedValue({ error: null });
+      render(<AddItemSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+      // Toggle on the until row (defaults to ~1 month after start).
+      fireEvent.press(screen.getByTestId('until-toggle'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+      const rule = mockedCreateBusy.mock.calls[0][0].recurrenceRule;
+      expect(rule).toMatchObject({ freq: 'weekly' });
+      // Default until = start + 1 month. Start defaults to 2026-05-13
+      // 09:00; so until should be 2026-06-13.
+      expect(rule?.until).toBe('2026-06-13');
+    });
+
+    it('day-of-week chips and until-toggle are hidden when "Repeat weekly" is OFF', () => {
+      render(<AddItemSheet {...baseProps} />);
+      expect(screen.queryByTestId('byday-chips')).toBeNull();
+      expect(screen.queryByTestId('until-toggle')).toBeNull();
+    });
+
+    it('edit mode pre-fills byDay chips and the until-date from the editing item', () => {
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly', byDay: [1, 3], until: '2026-12-31' },
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      fireEvent.press(screen.getByTestId('event-edit'));
+      // The chips are accessible — checked state on Mon (1) + Wed (3).
+      expect(screen.getByTestId('byday-1').props.accessibilityState.checked).toBe(true);
+      expect(screen.getByTestId('byday-3').props.accessibilityState.checked).toBe(true);
+      expect(screen.getByTestId('byday-2').props.accessibilityState.checked).toBe(false);
+      // Until-toggle is on; until-picker is rendered.
+      expect(screen.getByTestId('until-toggle').props.accessibilityState.checked).toBe(true);
     });
 
     it('toggling off in edit mode saves the row with recurrenceRule = null (turns the series back into a one-off)', async () => {

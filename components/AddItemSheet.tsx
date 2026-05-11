@@ -53,6 +53,21 @@ const PLACEHOLDER_COLOR = '#b5b5b5';
  * sheet a hint of forward depth as it lands. */
 const ENTRY_SCALE_FROM = 0.96;
 
+/** 2-letter chip labels for the day-of-week multi-picker, indexed by
+ * `Date#getDay()` (0=Sun…6=Sat). 2 letters keeps the seven chips
+ * comfortably across one row on phone widths; full names below are used
+ * for accessibility labels. */
+const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const WEEKDAY_FULL_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
 type Kind = 'busy' | 'unavailable';
 
 type Props = {
@@ -105,6 +120,58 @@ function withTime(prev: Date, picked: Date): Date {
   );
 }
 
+/** Local-zone YYYY-MM-DD for a Date. Mirrors `lib/calendar-helpers.ts`'s
+ * `isoDate` — kept inline to avoid a one-helper import dependency. */
+function toIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Parse a YYYY-MM-DD string into a local-zone Date at midnight. The
+ * `until` field uses YYYY-MM-DD so the day boundary is timezone-stable
+ * for the user. */
+function parseIsoDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** Build the view-mode recurrence summary string from a rule. Examples:
+ * - `{freq:'weekly'}` + Mon base → "Weekly on Monday"
+ * - `{freq:'weekly', byDay:[1,3,5]}` → "Weekly on Mon, Wed, Fri"
+ * - `{freq:'weekly', byDay:[1], until:'2026-12-31'}` → "Weekly on Monday until Dec 31, 2026"
+ *
+ * Pure (no JSX, no React) so it's trivial to unit-test if we ever do.
+ * Locale-aware via `Intl.DateTimeFormat`. */
+function summarizeRecurrence(rule: RecurrenceRule, baseStart: Date): string {
+  const baseWeekday = baseStart.getDay();
+  const days =
+    rule.byDay && rule.byDay.length > 0 ? [...rule.byDay] : [baseWeekday];
+  days.sort((a, b) => a - b);
+
+  // Single day → use the full weekday name; multiple → 3-letter abbrevs
+  // separated by commas. Keeps the line scannable in both common cases.
+  let dayPart: string;
+  if (days.length === 1) {
+    dayPart = WEEKDAY_FULL_NAMES[days[0]];
+  } else {
+    const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    dayPart = days.map((d) => SHORT[d]).join(', ');
+  }
+
+  let summary = `Weekly on ${dayPart}`;
+  if (rule.until) {
+    const untilDate = parseIsoDate(rule.until);
+    summary += ` until ${new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(untilDate)}`;
+  }
+  return summary;
+}
+
 /** Format a single date as "Wednesday, May 13, 2026" for view mode. */
 function formatLongDate(d: Date): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -148,12 +215,21 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   const [formMode, setFormMode] = useState<boolean>(!editing);
   // Custom popover menu state — opens below the three-dots button.
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
-  // Repeat-weekly toggle state. v1 of recurrence supports just this single
-  // option ("every Monday at 2pm" — weekday + time-of-day come from the
-  // base block's startsAt). Stored as a boolean here, projected into a
-  // `{ freq: 'weekly' }` rule on save (or null when off). Always false in
-  // unavailable-day mode — recurring all-day markers are out of v1 scope.
+  // Repeat-weekly toggle. When ON, the form expands to show day-of-week
+  // chips + an "until" date picker. The toggle being OFF means a one-off
+  // (recurrenceRule = null on save). Always false in unavailable-day
+  // mode — recurring all-day markers are out of scope for v2.
   const [repeatWeekly, setRepeatWeekly] = useState<boolean>(false);
+  // Selected weekdays (0=Sun…6=Sat). Empty array = "use the base's
+  // weekday" (the helper falls back to that). Multi-select chips below
+  // the toggle let the user pick "Mon, Wed, Fri"-style schedules. When
+  // the user toggles "Repeat weekly" on at create-time we pre-select
+  // the weekday of `start` so the rule isn't accidentally empty.
+  const [byDay, setByDay] = useState<number[]>([]);
+  // Optional end-of-series date as YYYY-MM-DD. null = no `until` clause
+  // (the series repeats indefinitely; the helper still bounds expansion
+  // to the requested query window).
+  const [until, setUntil] = useState<string | null>(null);
 
   const initialStart = useMemo(() => {
     if (editing?.kind === 'busy_block') return editing.startsAt;
@@ -295,11 +371,13 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
       setEnd(initialEnd);
       setFormMode(!editing);
       setMenuOpen(false);
-      // Pre-fill the toggle from the editing item. For an unavailable_day
-      // the field is always considered off (no recurrence support yet).
-      setRepeatWeekly(
-        editing?.kind === 'busy_block' && editing.recurrenceRule != null,
-      );
+      // Pre-fill recurrence from the editing item. For an unavailable_day
+      // the toggle is always considered off (no recurrence support yet).
+      const editingRule =
+        editing?.kind === 'busy_block' ? editing.recurrenceRule : null;
+      setRepeatWeekly(editingRule != null);
+      setByDay(editingRule?.byDay ?? []);
+      setUntil(editingRule?.until ?? null);
     }
   }, [visible, editing, editingKind, initialStart, initialEnd]);
 
@@ -315,12 +393,15 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           toast.error('End time must be after start time.');
           return;
         }
-        // Project the v1 toggle into the storage shape. Future variants
-        // (byDay picker, until-date) will branch here to build a richer
-        // rule — for now it's just present-or-null.
-        const recurrenceRule: RecurrenceRule | null = repeatWeekly
-          ? { freq: 'weekly' }
-          : null;
+        // Project the toggle + chips + until-date into the storage
+        // shape. Empty byDay → omitted (helper falls back to the base's
+        // weekday). Null until → omitted (series repeats indefinitely).
+        let recurrenceRule: RecurrenceRule | null = null;
+        if (repeatWeekly) {
+          recurrenceRule = { freq: 'weekly' };
+          if (byDay.length > 0) recurrenceRule.byDay = [...byDay].sort((a, b) => a - b);
+          if (until) recurrenceRule.until = until;
+        }
         const { error } =
           editing?.kind === 'busy_block'
             ? await updateBusyBlock({
@@ -555,14 +636,14 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 <Text style={styles.viewValue} testID="view-time">{viewTimeRange}</Text>
               </View>
               {editing && editing.kind === 'busy_block' && editing.recurrenceRule ? (
-                // v1 only supports `freq: 'weekly'`. The text is a fixed
-                // string for now; a future PR with a day-of-week picker
-                // / until-date will format this with the actual selected
-                // days, e.g. "Repeats weekly on Mon, Wed, Fri until Jul 1".
+                // Compose the recurrence summary from the rule's byDay
+                // and until fields. Empty/missing byDay → just "weekly"
+                // (the helper falls back to the base's weekday). Missing
+                // until → no end-date suffix.
                 <View style={styles.viewRow}>
                   <Text style={styles.viewLabel}>Repeats</Text>
                   <Text style={styles.viewValue} testID="view-recurrence">
-                    Repeats weekly
+                    {summarizeRecurrence(editing.recurrenceRule, editing.startsAt)}
                   </Text>
                 </View>
               ) : null}
@@ -668,16 +749,23 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                     />
                   </View>
 
-                  {/* Repeat-weekly toggle. v1 of recurrence is just on/off:
-                      "every {weekday-of-startsAt} at {time-of-startsAt}". A
-                      future PR will surface the day-of-week picker + an
-                      until-date in a deeper recurrence section. The toggle
-                      is built as a tap-to-flip Pressable rather than RN's
-                      Switch so it matches the rest of the sheet's
-                      monochrome aesthetic and works without the platform
-                      Switch's iOS green tint. */}
+                  {/* Repeat-weekly toggle. Hand-rolled mini-switch (not
+                      RN's Switch) so the off / on visuals stay
+                      monochrome and don't collide with the iOS green
+                      tint. Toggling on for the first time auto-seeds
+                      `byDay` with the start's weekday so the rule never
+                      saves with both an empty byDay AND no inferred
+                      default visible to the user. */}
                   <Pressable
-                    onPress={() => setRepeatWeekly((v) => !v)}
+                    onPress={() => {
+                      setRepeatWeekly((v) => {
+                        const next = !v;
+                        if (next && byDay.length === 0) {
+                          setByDay([start.getDay()]);
+                        }
+                        return next;
+                      });
+                    }}
                     accessibilityRole="switch"
                     accessibilityState={{ checked: repeatWeekly }}
                     accessibilityLabel="Repeat weekly"
@@ -702,6 +790,104 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                       />
                     </View>
                   </Pressable>
+
+                  {repeatWeekly ? (
+                    <>
+                      {/* Day-of-week multi-picker. 7 chips, tap to
+                          toggle that weekday in/out of `byDay`. Empty
+                          selection saves as no `byDay` (helper falls
+                          back to the base block's weekday). */}
+                      <View style={styles.dayChipRow} testID="byday-chips">
+                        {WEEKDAY_LABELS.map((label, dayIdx) => {
+                          const selected = byDay.includes(dayIdx);
+                          return (
+                            <Pressable
+                              key={dayIdx}
+                              onPress={() => {
+                                setByDay((prev) =>
+                                  prev.includes(dayIdx)
+                                    ? prev.filter((d) => d !== dayIdx)
+                                    : [...prev, dayIdx],
+                                );
+                              }}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: selected }}
+                              accessibilityLabel={`Repeat on ${WEEKDAY_FULL_NAMES[dayIdx]}`}
+                              testID={`byday-${dayIdx}`}
+                              style={[
+                                styles.dayChip,
+                                selected && styles.dayChipSelected,
+                              ]}
+                            >
+                              <Text
+                                style={
+                                  selected
+                                    ? styles.dayChipLabelSelected
+                                    : styles.dayChipLabel
+                                }
+                              >
+                                {label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+
+                      {/* Optional end-of-series date. Toggle-style row
+                          mirroring "Repeat weekly" — flipping it on
+                          opens a DatePicker pre-seeded one month after
+                          the start; flipping off clears the until
+                          string. The date picker stays mounted while
+                          the row is on so the user can adjust without
+                          re-toggling. */}
+                      <Pressable
+                        onPress={() => {
+                          if (until) {
+                            setUntil(null);
+                          } else {
+                            // Default: 1 month after the start.
+                            const def = new Date(start);
+                            def.setMonth(def.getMonth() + 1);
+                            setUntil(toIsoDate(def));
+                          }
+                        }}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: until != null }}
+                        accessibilityLabel="Set an end date"
+                        testID="until-toggle"
+                        style={({ pressed }) => [
+                          styles.repeatRow,
+                          pressed && styles.repeatRowPressed,
+                        ]}
+                      >
+                        <Text style={styles.repeatLabel}>Ends on a date</Text>
+                        <View
+                          style={[
+                            styles.repeatSwitch,
+                            until != null && styles.repeatSwitchOn,
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.repeatSwitchKnob,
+                              until != null && styles.repeatSwitchKnobOn,
+                            ]}
+                          />
+                        </View>
+                      </Pressable>
+
+                      {until ? (
+                        <View style={styles.untilRow}>
+                          <Text style={styles.label}>Ends</Text>
+                          <DatePicker
+                            testID="until-picker"
+                            value={parseIsoDate(until)}
+                            onChange={(picked) => setUntil(toIsoDate(picked))}
+                          />
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null}
                 </>
               ) : null}
 
@@ -958,6 +1144,39 @@ const styles = StyleSheet.create({
   repeatSwitchKnobOn: {
     // Translate the knob to the right edge of the track.
     transform: [{ translateX: 14 }],
+  },
+  // Day-of-week multi-picker: 7 chips in a row, evenly spaced. Each
+  // chip is a small circle with a 2-letter day label; selected chips
+  // invert (black fill, white text) to match the kind-toggle style
+  // higher up in the sheet.
+  dayChipRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  dayChip: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayChipSelected: {
+    backgroundColor: '#111',
+    borderColor: '#111',
+  },
+  dayChipLabel: { fontSize: 13, color: '#444' },
+  dayChipLabelSelected: { fontSize: 13, color: '#fff', fontWeight: '600' },
+  // Row holding the until-date label + DatePicker. Visually mirrors the
+  // existing Starts/Ends rows higher in the form so the recurrence
+  // section feels of-a-piece with the time pickers.
+  untilRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   timeRow: {
     flexDirection: 'row',
