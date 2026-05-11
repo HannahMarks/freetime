@@ -25,13 +25,14 @@ type UnavailableDayRow = {
   date: string;
   title: string | null;
   notes: string | null;
+  recurrence_rule: unknown;
   user: ProfileRow | null;
 };
 
 const BUSY_SELECT =
   'id, user_id, title, starts_at, ends_at, notes, location, recurrence_rule, user:profiles(id, display_name, color)';
 const UNAVAIL_SELECT =
-  'user_id, date, title, notes, user:profiles(id, display_name, color)';
+  'user_id, date, title, notes, recurrence_rule, user:profiles(id, display_name, color)';
 
 function describeError(err: unknown): string {
   if (process.env.NODE_ENV !== 'production') {
@@ -85,8 +86,12 @@ export async function listCalendarItems(args: {
     supabase
       .from('unavailable_days')
       .select(UNAVAIL_SELECT)
-      .gte('date', args.fromDate)
-      .lt('date', args.toDate),
+      // `date < toDate` always — we never need future-only rows.
+      // `date >= fromDate` for one-offs OR row is recurring (so series
+      // whose base date is before the window are pulled and expanded
+      // forward). Mirrors the busy_blocks query shape above.
+      .lt('date', args.toDate)
+      .or(`date.gte.${args.fromDate},recurrence_rule.not.is.null`),
   ]);
 
   if (busyResult.error) return { data: null, error: describeError(busyResult.error) };
@@ -151,13 +156,48 @@ export async function listCalendarItems(args: {
 
   for (const row of (daysResult.data ?? []) as unknown as UnavailableDayRow[]) {
     if (!row.user) continue;
-    items.push({
-      kind: 'unavailable_day',
-      user: row.user,
-      date: row.date,
-      title: row.title,
-      notes: row.notes,
-    });
+    if (isRecurrenceRule(row.recurrence_rule)) {
+      // Reuse `expandOccurrences` by treating the date as a
+      // [midnight, next-midnight) interval. The helper returns one
+      // result per occurring day; we map each back to a YYYY-MM-DD
+      // string for the UnavailableDayItem.date field. seriesDate is
+      // the row's PK component so action layer (edit/delete) can
+      // identify the underlying row.
+      const [by, bm, bd] = row.date.split('-').map(Number);
+      const baseStart = new Date(by, bm - 1, bd);
+      const baseEnd = new Date(by, bm - 1, bd + 1);
+      const occurrences = expandOccurrences({
+        rule: row.recurrence_rule,
+        baseStart,
+        baseEnd,
+        rangeStart,
+        rangeEnd,
+      });
+      for (const occ of occurrences) {
+        const occDate = `${occ.startsAt.getFullYear()}-${String(
+          occ.startsAt.getMonth() + 1,
+        ).padStart(2, '0')}-${String(occ.startsAt.getDate()).padStart(2, '0')}`;
+        items.push({
+          kind: 'unavailable_day',
+          user: row.user,
+          date: occDate,
+          title: row.title,
+          notes: row.notes,
+          recurrenceRule: row.recurrence_rule,
+          seriesDate: row.date,
+        });
+      }
+    } else {
+      items.push({
+        kind: 'unavailable_day',
+        user: row.user,
+        date: row.date,
+        title: row.title,
+        notes: row.notes,
+        recurrenceRule: null,
+        seriesDate: row.date,
+      });
+    }
   }
 
   return { data: items, error: null };

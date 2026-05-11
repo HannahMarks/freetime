@@ -87,8 +87,13 @@ describe('listCalendarItems', () => {
     expect(busyBuilder.or).toHaveBeenCalledWith(
       expect.stringMatching(/ends_at\.gt\.2026-05-13.*recurrence_rule\.not\.is\.null/),
     );
-    expect(daysBuilder.gte).toHaveBeenCalledWith('date', '2026-05-13');
+    // Same OR-with-recurring-bypass shape as the busy_blocks query so
+    // recurring unavailable_days whose base date is before the window
+    // are still pulled and expanded forward.
     expect(daysBuilder.lt).toHaveBeenCalledWith('date', '2026-05-20');
+    expect(daysBuilder.or).toHaveBeenCalledWith(
+      expect.stringMatching(/date\.gte\.2026-05-13.*recurrence_rule\.not\.is\.null/),
+    );
 
     // The select clauses must request notes + location so they're available
     // client-side without a second round-trip. recurrence_rule is in there
@@ -329,6 +334,178 @@ describe('listCalendarItems', () => {
       const item = data?.[0];
       if (item?.kind !== 'busy_block') throw new Error('expected busy_block');
       expect(item.startsAt.getDate()).toBe(18);
+    });
+  });
+
+  describe('recurring unavailable_days', () => {
+    it('expands a weekly recurring unavailable_day into one item per occurrence date', async () => {
+      // Base date Mon May 11 2026; window May 11 → June 1 (3 weeks).
+      // Expect 3 occurrences on May 11, 18, 25.
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-05-11',
+                title: 'PTO',
+                notes: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        );
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      expect(error).toBeNull();
+      expect(data).toHaveLength(3);
+      const dates = (data ?? [])
+        .filter((i): i is Extract<typeof i, { kind: 'unavailable_day' }> =>
+          i.kind === 'unavailable_day',
+        )
+        .map((i) => i.date)
+        .sort();
+      expect(dates).toEqual(['2026-05-11', '2026-05-18', '2026-05-25']);
+      // Every occurrence carries the rule + the series's base date so
+      // tap-to-edit can find the underlying row.
+      for (const item of data ?? []) {
+        if (item.kind !== 'unavailable_day') continue;
+        expect(item.recurrenceRule).toEqual({ freq: 'weekly' });
+        expect(item.title).toBe('PTO');
+        expect(item.seriesDate).toBe('2026-05-11');
+      }
+    });
+
+    it('also expands series whose base date is BEFORE the window', async () => {
+      // Base Mon Jan 5 2026, window May 11 → June 1. Expect just the
+      // May Mondays in range: 11, 18, 25.
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-01-05',
+                title: 'No-meeting day',
+                notes: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        );
+
+      const { data } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      const dates = (data ?? [])
+        .filter((i) => i.kind === 'unavailable_day')
+        .map((i) => i.date)
+        .sort();
+      expect(dates).toEqual(['2026-05-11', '2026-05-18', '2026-05-25']);
+    });
+
+    it('returns recurrenceRule = null on non-recurring unavailable_days (and seriesDate = date)', async () => {
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-05-13',
+                title: 'PTO',
+                notes: null,
+                recurrence_rule: null,
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        );
+
+      const { data } = await listCalendarItems({
+        fromDate: '2026-05-13',
+        toDate: '2026-05-14',
+      });
+
+      expect(data).toHaveLength(1);
+      const item = data?.[0];
+      if (item?.kind !== 'unavailable_day') throw new Error('expected unavailable_day');
+      expect(item.recurrenceRule).toBeNull();
+      expect(item.seriesDate).toBe('2026-05-13');
+    });
+
+    it('honors byDay + until on unavailable_days', async () => {
+      // Series base Mon May 11, byDay=[Mon,Wed], until May 25.
+      // Window May 11 → June 1. Expect May 11 (Mon), 13 (Wed), 18 (Mon),
+      // 20 (Wed), 25 (Mon). May 27 (Wed) is past `until`.
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-05-11',
+                title: 'No-meeting',
+                notes: null,
+                recurrence_rule: { freq: 'weekly', byDay: [1, 3], until: '2026-05-25' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        );
+
+      const { data } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      const dates = (data ?? [])
+        .filter((i) => i.kind === 'unavailable_day')
+        .map((i) => i.date)
+        .sort();
+      expect(dates).toEqual([
+        '2026-05-11',
+        '2026-05-13',
+        '2026-05-18',
+        '2026-05-20',
+        '2026-05-25',
+      ]);
+    });
+
+    it('uses the OR predicate to fetch series whose base date is before the window', async () => {
+      const dayBuilder = chainable({ data: [], error: null });
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() => dayBuilder);
+
+      await listCalendarItems({ fromDate: '2026-05-13', toDate: '2026-05-20' });
+
+      // Includes recurrence_rule in the select — needed for client-side
+      // expansion without a second round-trip.
+      expect(dayBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/recurrence_rule/));
+      // The OR predicate broadens the date filter so recurring rows whose
+      // base date is BEFORE the window are still pulled.
+      expect(dayBuilder.or).toHaveBeenCalledWith(
+        expect.stringMatching(/date\.gte\.2026-05-13.*recurrence_rule\.not\.is\.null/),
+      );
+      // The hard `date < toDate` cap stays — no need to fetch
+      // future-only series.
+      expect(dayBuilder.lt).toHaveBeenCalledWith('date', '2026-05-20');
     });
   });
 });

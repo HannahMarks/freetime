@@ -34,9 +34,25 @@ export type BusyBlockItem = {
 export type UnavailableDayItem = {
   kind: 'unavailable_day';
   user: FriendProfile;
-  date: string; // YYYY-MM-DD
+  /** YYYY-MM-DD. For recurring series, this is the OCCURRENCE date —
+   * `listCalendarItems` expands the series into one item per occurring
+   * date in the requested window. The DB row's date (the series's
+   * first occurrence) stays the action-layer key for tap-to-edit /
+   * tap-to-delete; carry it on `seriesDate` so the action layer can
+   * find the right row. */
+  date: string;
   title: string | null;
   notes: string | null;
+  /** Non-null when this item is one occurrence of a repeating series.
+   * Optional in the type only so legacy test fixtures don't all need
+   * updating — production builders (`listCalendarItems`) always set it
+   * explicitly to `null` for one-off rows. */
+  recurrenceRule?: RecurrenceRule | null;
+  /** The base row's `date` (PK component, alongside `user_id`). For a
+   * one-off, this equals `date`. For an expanded occurrence, this is
+   * the SERIES start (NOT the per-occurrence date). Used by edit /
+   * delete actions to identify the underlying row. */
+  seriesDate?: string;
 };
 
 export type CalendarItem = BusyBlockItem | UnavailableDayItem;

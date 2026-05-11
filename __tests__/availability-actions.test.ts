@@ -169,6 +169,7 @@ describe('availability-actions', () => {
         date: '2026-05-13',
         title: 'PTO',
         notes: 'Out of state for the long weekend',
+        recurrence_rule: null,
       });
     });
 
@@ -285,9 +286,58 @@ describe('availability-actions', () => {
       expect(builder.update).toHaveBeenCalledWith({
         title: 'Renamed PTO',
         notes: 'Hawaii through Sunday',
+        recurrence_rule: null,
       });
       expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'me-id');
       expect(builder.eq).toHaveBeenNthCalledWith(2, 'date', '2026-05-13');
+    });
+
+    it('writes recurrence_rule when provided (turns a one-off into a series, or rewrites the rule)', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await updateUnavailableDay({
+        userId: 'me-id',
+        date: '2026-05-13',
+        title: null,
+        notes: null,
+        recurrenceRule: { freq: 'weekly', byDay: [3] },
+      });
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ recurrence_rule: { freq: 'weekly', byDay: [3] } }),
+      );
+    });
+  });
+
+  describe('createUnavailableDay (recurrence)', () => {
+    it('persists recurrence_rule when provided', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await createUnavailableDay({
+        date: '2026-05-13',
+        title: null,
+        notes: null,
+        recurrenceRule: { freq: 'weekly', byDay: [3] },
+      });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ recurrence_rule: { freq: 'weekly', byDay: [3] } }),
+      );
+    });
+
+    it('persists recurrence_rule = null when omitted', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await createUnavailableDay({ date: '2026-05-13', title: null, notes: null });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ recurrence_rule: null }),
+      );
     });
   });
 

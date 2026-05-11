@@ -53,6 +53,10 @@ export async function createUnavailableDay(args: {
   date: string; // YYYY-MM-DD
   title: string | null;
   notes: string | null;
+  /** Optional. When set, the row is the FIRST occurrence of a repeating
+   * series; later occurrences are expanded client-side by
+   * `expandOccurrences`. Defaults to a one-off (null). */
+  recurrenceRule?: RecurrenceRule | null;
 }): Promise<ActionResult> {
   const {
     data: { user },
@@ -64,6 +68,7 @@ export async function createUnavailableDay(args: {
     date: args.date,
     title: args.title,
     notes: args.notes,
+    recurrence_rule: args.recurrenceRule ?? null,
   });
 
   if (error) {
@@ -108,10 +113,18 @@ export async function updateUnavailableDay(args: {
   date: string;
   title: string | null;
   notes: string | null;
+  /** Optional. When set, replaces the existing rule. When omitted, the
+   * column is set to null — i.e. "save without recurrence" (matches
+   * the toggle-off-in-edit-mode UX). */
+  recurrenceRule?: RecurrenceRule | null;
 }): Promise<ActionResult> {
   const { error } = await supabase
     .from('unavailable_days')
-    .update({ title: args.title, notes: args.notes })
+    .update({
+      title: args.title,
+      notes: args.notes,
+      recurrence_rule: args.recurrenceRule ?? null,
+    })
     .eq('user_id', args.userId)
     .eq('date', args.date);
 
