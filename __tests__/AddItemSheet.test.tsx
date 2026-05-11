@@ -856,6 +856,113 @@ describe('AddItemSheet', () => {
         alertSpy.mockRestore();
       });
     });
+
+    describe('date-change for a recurring unavailable_day occurrence', () => {
+      const recurringDay: CalendarItem = {
+        kind: 'unavailable_day',
+        user: me,
+        date: '2026-05-18',
+        seriesDate: '2026-05-11',
+        title: 'Mondays off',
+        notes: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+
+      it('renders an occurrence-date picker in the edit form (recurring unavailable_day only)', () => {
+        render(<AddItemSheet {...baseProps} editing={recurringDay} />);
+        fireEvent.press(screen.getByTestId('event-edit'));
+        const picker = datePickersByTestID()['occurrence-date-picker'];
+        expect(picker).toBeDefined();
+        // Pre-filled with the occurrence date, not the series start.
+        expect(picker.value?.getFullYear()).toBe(2026);
+        expect(picker.value?.getMonth()).toBe(4); // May
+        expect(picker.value?.getDate()).toBe(18);
+      });
+
+      it('does NOT render the picker for a one-off unavailable_day or a recurring busy_block', () => {
+        const oneOff: CalendarItem = {
+          kind: 'unavailable_day',
+          user: me,
+          date: '2026-05-13',
+          title: 'PTO',
+          notes: null,
+          recurrenceRule: null,
+          seriesDate: '2026-05-13',
+        };
+        const recurringBusy: CalendarItem = {
+          kind: 'busy_block',
+          id: 'series1',
+          user: me,
+          startsAt: new Date(2026, 4, 18, 14, 0),
+          endsAt: new Date(2026, 4, 18, 15, 0),
+          title: 'Yoga',
+          notes: null,
+          location: null,
+          recurrenceRule: { freq: 'weekly' },
+        };
+        const { rerender } = render(<AddItemSheet {...baseProps} editing={oneOff} />);
+        fireEvent.press(screen.getByTestId('event-edit'));
+        expect(datePickersByTestID()['occurrence-date-picker']).toBeUndefined();
+        rerender(<AddItemSheet {...baseProps} editing={recurringBusy} />);
+        fireEvent.press(screen.getByTestId('event-edit'));
+        expect(datePickersByTestID()['occurrence-date-picker']).toBeUndefined();
+      });
+
+      it('saving with "This event only" passes the new date through to editUnavailableDayOccurrence', async () => {
+        const mockedEdit = jest.requireMock('../lib/availability-actions')
+          .editUnavailableDayOccurrence as jest.Mock;
+        mockedEdit.mockResolvedValue({ error: null });
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const thisOneBtn = (buttons ?? []).find((b) => b.text === 'This event only');
+          thisOneBtn?.onPress?.();
+        });
+
+        render(<AddItemSheet {...baseProps} editing={recurringDay} />);
+        fireEvent.press(screen.getByTestId('event-edit'));
+        // User picks a new date — Mon May 18 → Tue May 19.
+        await act(async () => {
+          const picker = datePickersByTestID()['occurrence-date-picker'];
+          picker.onChange?.(new Date(2026, 4, 19));
+        });
+        fireEvent.press(screen.getByLabelText('Save'));
+
+        await waitFor(() => expect(mockedEdit).toHaveBeenCalled());
+        const call = mockedEdit.mock.calls[0][0];
+        expect(call.seriesUserId).toBe('me-id');
+        expect(call.seriesDate).toBe('2026-05-11');
+        expect(call.originalDate).toBe('2026-05-18');
+        expect(call.newDate).toBe('2026-05-19');
+
+        alertSpy.mockRestore();
+      });
+
+      it('saving without changing the date omits newDate from the action call (override-only exception)', async () => {
+        const mockedEdit = jest.requireMock('../lib/availability-actions')
+          .editUnavailableDayOccurrence as jest.Mock;
+        mockedEdit.mockClear();
+        mockedEdit.mockResolvedValue({ error: null });
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const thisOneBtn = (buttons ?? []).find((b) => b.text === 'This event only');
+          thisOneBtn?.onPress?.();
+        });
+
+        render(<AddItemSheet {...baseProps} editing={recurringDay} />);
+        fireEvent.press(screen.getByTestId('event-edit'));
+        // Don't touch the picker — just change the title.
+        fireEvent.changeText(screen.getByDisplayValue('Mondays off'), 'Mondays off!!');
+        fireEvent.press(screen.getByLabelText('Save'));
+
+        await waitFor(() => expect(mockedEdit).toHaveBeenCalled());
+        const call = mockedEdit.mock.calls[0][0];
+        // newDate is `undefined` in the call args — the action layer
+        // then defaults it to originalDate (an override-only
+        // exception, not a true move).
+        expect(call.newDate).toBeUndefined();
+        expect(call.title).toBe('Mondays off!!');
+
+        alertSpy.mockRestore();
+      });
+    });
   });
 
   describe('weekly recurrence', () => {

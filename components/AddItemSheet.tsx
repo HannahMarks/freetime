@@ -234,6 +234,14 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   // (the series repeats indefinitely; the helper still bounds expansion
   // to the requested query window).
   const [until, setUntil] = useState<string | null>(null);
+  // YYYY-MM-DD: the occurrence's currently-displayed date, EDITABLE only
+  // when the user is editing a recurring unavailable_day occurrence —
+  // changing it (combined with "This event only" on save) writes a
+  // `move` exception that ships the occurrence to a different day
+  // without touching its siblings. Pre-filled from `editing.date` on
+  // open; ignored on creation and on busy_blocks (which have their own
+  // start-date pickers inside the time pickers).
+  const [occurrenceDate, setOccurrenceDate] = useState<string>(selectedDate);
 
   const initialStart = useMemo(() => {
     if (editing?.kind === 'busy_block') return editing.startsAt;
@@ -387,8 +395,19 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
       setRepeatWeekly(editingRule != null);
       setByDay(editingRule?.byDay ?? []);
       setUntil(editingRule?.until ?? null);
+      // Pre-fill the occurrence-date picker. For an unavailable_day,
+      // use the per-occurrence date (`editing.date`) which may differ
+      // from the series's `seriesDate` when a previous move exception
+      // has been applied. For everything else, default to the parent
+      // screen's selectedDate (the value the picker would show if the
+      // user toggled it on — but the picker is only rendered for the
+      // recurring-unavailable case, so it's never actually shown
+      // elsewhere).
+      setOccurrenceDate(
+        editing?.kind === 'unavailable_day' ? editing.date : selectedDate,
+      );
     }
-  }, [visible, editing, editingKind, initialStart, initialEnd]);
+  }, [visible, editing, editingKind, initialStart, initialEnd, selectedDate]);
 
   /** Pure projection — turn current state into a recurrence rule (or
    * null if the toggle is off). Used by both the series and
@@ -504,16 +523,22 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           return;
         }
       } else {
-        // unavailable_day occurrence — no time component, just maybe
-        // a new date + override title/notes. For v7 we don't surface
-        // a date-change UI in the sheet for unavailable_days (there's
-        // no DatePicker for occurrence-date), so newDate is omitted
-        // here and the action defaults it to originalDate (= an
-        // override-only exception).
+        // unavailable_day occurrence — v8 added a DatePicker so the
+        // user can change the occurrence date. When the picked date
+        // equals the originalDate, this is an override-only exception
+        // (just a title/notes change for this one day). When the
+        // picked date differs, it's a true date move (the action
+        // upserts `new_date = occurrenceDate`).
+        const originalDate = editing.originalDate ?? editing.date;
         const { error } = await editUnavailableDayOccurrence({
           seriesUserId: editing.user.id,
           seriesDate: editing.seriesDate ?? editing.date,
-          originalDate: editing.originalDate ?? editing.date,
+          originalDate,
+          // Only pass `newDate` when the user actually changed the
+          // date. Otherwise the action's default (`newDate =
+          // originalDate`) kicks in — an override-only move
+          // exception.
+          newDate: occurrenceDate !== originalDate ? occurrenceDate : undefined,
           title: trimmedTitle,
           notes: trimmedNotes,
         });
@@ -881,6 +906,28 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                   onChangeText={setTitle}
                 />
               </View>
+
+              {/* Date picker for a RECURRING UNAVAILABLE_DAY OCCURRENCE
+                  only. Lets the user "move" a single Monday in a
+                  weekly series to a different day without affecting
+                  the rest of the Mondays — on save, picking "This
+                  event only" writes a `move` exception with the new
+                  date. Hidden in every other case (one-offs use the
+                  existing tap-the-day-to-pick UX; busy_blocks have
+                  their own start/end date pickers inside the time
+                  pickers; creation has no occurrence to move yet). */}
+              {kind === 'unavailable' &&
+              editing?.kind === 'unavailable_day' &&
+              editing.recurrenceRule ? (
+                <View style={styles.timeRow}>
+                  <Text style={styles.label}>Date</Text>
+                  <DatePicker
+                    testID="occurrence-date-picker"
+                    value={parseIsoDate(occurrenceDate)}
+                    onChange={(picked) => setOccurrenceDate(toIsoDate(picked))}
+                  />
+                </View>
+              ) : null}
 
               {kind === 'busy' ? (
                 <>
