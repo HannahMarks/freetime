@@ -43,6 +43,35 @@ function CalendarIcon({ color }: { color: string }) {
   );
 }
 
+/**
+ * Manual-drawn events icon — a starburst / sparkle, deliberately
+ * different from the calendar icon (the calendar tab is "your
+ * schedule"; the events tab is "things you're hosting"). Drawn from
+ * five thin bars rotated around a common center: top–bottom,
+ * left–right, plus diagonals. The visual is "✦"-shaped without
+ * depending on a Unicode glyph.
+ */
+function EventsIcon({ color }: { color: string }) {
+  return (
+    <View style={iconStyles.container}>
+      <View style={[iconStyles.sparkVertical, { backgroundColor: color }]} />
+      <View style={[iconStyles.sparkHorizontal, { backgroundColor: color }]} />
+      <View
+        style={[
+          iconStyles.sparkDiagonal,
+          { backgroundColor: color, transform: [{ rotate: '45deg' }] },
+        ]}
+      />
+      <View
+        style={[
+          iconStyles.sparkDiagonal,
+          { backgroundColor: color, transform: [{ rotate: '-45deg' }] },
+        ]}
+      />
+    </View>
+  );
+}
+
 const iconStyles = StyleSheet.create({
   // Outer wrapper holds enough vertical room for the rings to extend
   // ABOVE the calendar body without being clipped (the body is 22 tall
@@ -90,6 +119,33 @@ const iconStyles = StyleSheet.create({
     height: 5,
     borderRadius: 1,
   },
+  // Events-icon spark bars. All four overlap at the icon's center; the
+  // rotated ones are length-matched so the resulting glyph reads as a
+  // symmetrical four-pointed star.
+  sparkVertical: {
+    position: 'absolute',
+    top: 3,
+    left: 11,
+    width: 2,
+    height: 20,
+    borderRadius: 1,
+  },
+  sparkHorizontal: {
+    position: 'absolute',
+    top: 12,
+    left: 2,
+    width: 20,
+    height: 2,
+    borderRadius: 1,
+  },
+  sparkDiagonal: {
+    position: 'absolute',
+    top: 8,
+    left: 4,
+    width: 16,
+    height: 2,
+    borderRadius: 1,
+  },
 });
 
 export default function AppTabsLayout() {
@@ -125,6 +181,31 @@ export default function AppTabsLayout() {
               ]}
             >
               <CalendarIcon color={focused ? '#111' : '#888'} />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: 'Events',
+          // Same focus-pill treatment as the calendar tab so the
+          // bottom-nav is visually consistent — the user-color
+          // backdrop signals "active tab," the icon stays
+          // monochrome for legibility.
+          tabBarActiveTintColor: userColor,
+          tabBarIcon: ({ focused }) => (
+            <View
+              style={[
+                styles.iconPill,
+                {
+                  backgroundColor: focused
+                    ? hexAlpha(userColor, 0.28)
+                    : 'transparent',
+                },
+              ]}
+            >
+              <EventsIcon color={focused ? '#111' : '#888'} />
             </View>
           ),
         }}
