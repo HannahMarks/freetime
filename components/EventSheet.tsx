@@ -22,8 +22,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { FriendProfile } from '../lib/calendar-helpers';
 import { formatTimeRange } from '../lib/calendar-helpers';
-import { createEvent, deleteEvent, updateEvent } from '../lib/event-actions';
+import {
+  createEvent,
+  deleteEvent,
+  inviteFriends,
+  updateEvent,
+} from '../lib/event-actions';
 import type { EventItem } from '../lib/event-helpers';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
@@ -46,6 +52,12 @@ type Props = {
   /** If set, the sheet opens on this event in view mode. The pencil
    * button switches to the edit form. */
   editing?: EventItem | null;
+  /** Accepted-friend profiles that can be invited from the picker.
+   * The parent (events screen) fetches these via `listFriendships`
+   * and passes them in so the sheet doesn't have to know about the
+   * friends action layer directly. Empty array is fine — the picker
+   * just renders an empty state. */
+  friends?: FriendProfile[];
   onClose: () => void;
   /** Fires after a successful save OR delete. Parent should refetch. */
   onSaved: () => void;
@@ -80,6 +92,16 @@ function withTime(prev: Date, picked: Date): Date {
   );
 }
 
+/** Append a 2-hex-digit alpha to a "#RRGGBB" hex. Inlined here so the
+ * sheet doesn't depend on any other component's helper. Same as the
+ * version in DayTimeline + the app layout's tab pill. */
+function hexAlpha(hex: string, alpha: number): string {
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255)
+    .toString(16)
+    .padStart(2, '0');
+  return `${hex}${a}`;
+}
+
 function formatLongDate(d: Date): string {
   return new Intl.DateTimeFormat(undefined, {
     weekday: 'long',
@@ -107,12 +129,23 @@ function formatLongDate(d: Date): string {
  *   - **Edit** (`editing` set, `formMode` true — entered via pencil
  *     tap): heading "Edit event", form body pre-filled, Save button.
  */
-export function EventSheet({ visible, defaultDate, editing, onClose, onSaved }: Props) {
+export function EventSheet({
+  visible,
+  defaultDate,
+  editing,
+  friends,
+  onClose,
+  onSaved,
+}: Props) {
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formMode, setFormMode] = useState<boolean>(!editing);
+  // Set of friend ids selected to invite. Only relevant in CREATE
+  // mode — edit-and-add and edit-and-remove invitees comes in H5's
+  // event-detail view. We reset this whenever the sheet opens.
+  const [inviteeIds, setInviteeIds] = useState<Set<string>>(() => new Set());
 
   // Default times for a NEW event: 6pm–9pm on the default date — a
   // reasonable host-side guess for "plan something with friends".
@@ -170,6 +203,7 @@ export function EventSheet({ visible, defaultDate, editing, onClose, onSaved }: 
       setStart(editing ? editing.startsAt : buildDate(defaultDate, 18, 0));
       setEnd(editing ? editing.endsAt : buildDate(defaultDate, 21, 0));
       setFormMode(!editing);
+      setInviteeIds(new Set());
     }
   }, [visible, editing, defaultDate]);
 
@@ -219,25 +253,47 @@ export function EventSheet({ visible, defaultDate, editing, onClose, onSaved }: 
         toast.error('End time must be after start time.');
         return;
       }
-      const { error } = editing
-        ? await updateEvent({
-            id: editing.id,
-            startsAt: start,
-            endsAt: end,
-            title: trimmedTitle,
-            notes: trimmedNotes,
-            location: trimmedLocation,
-          })
-        : await createEvent({
-            startsAt: start,
-            endsAt: end,
-            title: trimmedTitle,
-            notes: trimmedNotes,
-            location: trimmedLocation,
+      if (editing) {
+        const { error } = await updateEvent({
+          id: editing.id,
+          startsAt: start,
+          endsAt: end,
+          title: trimmedTitle,
+          notes: trimmedNotes,
+          location: trimmedLocation,
+        });
+        if (error) {
+          toast.error(error);
+          return;
+        }
+      } else {
+        // Create path: createEvent returns the new id, then we
+        // chain inviteFriends with whatever the user picked.
+        // If invites fail, the event itself still landed (a partial
+        // success) — we toast the invite error so the user knows but
+        // don't roll back the event. Re-creating with the same picker
+        // selection on retry would just no-op via ignoreDuplicates.
+        const { id, error } = await createEvent({
+          startsAt: start,
+          endsAt: end,
+          title: trimmedTitle,
+          notes: trimmedNotes,
+          location: trimmedLocation,
+        });
+        if (error || !id) {
+          toast.error(error ?? "Couldn't create event. Please try again.");
+          return;
+        }
+        if (inviteeIds.size > 0) {
+          const { error: inviteError } = await inviteFriends({
+            eventId: id,
+            inviteeIds: Array.from(inviteeIds),
           });
-      if (error) {
-        toast.error(error);
-        return;
+          if (inviteError) {
+            toast.error(inviteError);
+            // Fall through — the event itself was created.
+          }
+        }
       }
       onSaved();
       onClose();
@@ -391,6 +447,21 @@ export function EventSheet({ visible, defaultDate, editing, onClose, onSaved }: 
                       <Text style={styles.viewValue} testID="view-notes">{editing.notes}</Text>
                     </View>
                   ) : null}
+                  {editing?.attendees && editing.attendees.length > 0 ? (
+                    <View style={styles.viewRow}>
+                      <Text style={styles.viewLabel}>Invited</Text>
+                      <Text style={styles.viewValue} testID="view-attendees">
+                        {editing.attendees
+                          .map(
+                            (a) =>
+                              `${a.invitee.display_name}${
+                                a.status !== 'pending' ? ` (${a.status})` : ''
+                              }`,
+                          )
+                          .join(', ')}
+                      </Text>
+                    </View>
+                  ) : null}
                 </ScrollView>
               ) : (
                 <ScrollView
@@ -463,6 +534,76 @@ export function EventSheet({ visible, defaultDate, editing, onClose, onSaved }: 
                       textAlignVertical="top"
                     />
                   </View>
+
+                  {/* Invite picker (CREATE mode only — adding /
+                      removing invitees on an existing event lives in
+                      the H5 event-detail view). Renders a chip per
+                      accepted friend; tapping toggles selection. The
+                      friend list comes in via the parent — we don't
+                      fetch it here to keep this component side-
+                      effect-free. Empty state when there are no
+                      accepted friends: hints how to get there. */}
+                  {!editing ? (
+                    <View style={styles.field} testID="invite-picker">
+                      <Text style={styles.label}>Invite friends</Text>
+                      {(friends ?? []).length === 0 ? (
+                        <Text style={styles.inviteEmpty}>
+                          No friends to invite yet — add some from the
+                          Friends tab first.
+                        </Text>
+                      ) : (
+                        <View style={styles.chipRow}>
+                          {(friends ?? []).map((f) => {
+                            const selected = inviteeIds.has(f.id);
+                            return (
+                              <Pressable
+                                key={f.id}
+                                onPress={() => {
+                                  setInviteeIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(f.id)) next.delete(f.id);
+                                    else next.add(f.id);
+                                    return next;
+                                  });
+                                }}
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: selected }}
+                                accessibilityLabel={`Invite ${f.display_name}`}
+                                testID={`invite-chip-${f.id}`}
+                                style={[
+                                  styles.inviteChip,
+                                  {
+                                    // Always carries the friend's own color
+                                    // on the left bar so the chip reads as
+                                    // "this person". Selected state fills
+                                    // the rest of the chip with a tint of
+                                    // that color so the affordance is
+                                    // visually obvious without depending on
+                                    // text styling alone.
+                                    borderLeftColor: f.color,
+                                  },
+                                  selected && {
+                                    backgroundColor: hexAlpha(f.color, 0.22),
+                                    borderColor: f.color,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={
+                                    selected
+                                      ? styles.inviteChipLabelSelected
+                                      : styles.inviteChipLabel
+                                  }
+                                >
+                                  {f.display_name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  ) : null}
                 </ScrollView>
               )}
             </KeyboardAvoidingView>
@@ -596,4 +737,24 @@ const styles = StyleSheet.create({
   savePressed: { opacity: 0.85 },
   saveDisabled: { opacity: 0.5 },
   saveLabel: { fontSize: 14, color: '#fff', fontWeight: '600' },
+  // Invite-picker layout: chips wrap onto multiple rows since a host
+  // could have a couple dozen friends. flexWrap + gap keeps the row
+  // visually tidy without manual measurement.
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  inviteChip: {
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderLeftWidth: 4,
+    backgroundColor: '#fff',
+  },
+  inviteChipLabel: { fontSize: 13, color: '#444' },
+  inviteChipLabelSelected: { fontSize: 13, color: '#111', fontWeight: '600' },
+  inviteEmpty: { fontSize: 13, color: '#888', lineHeight: 18 },
 });

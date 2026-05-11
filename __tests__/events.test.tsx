@@ -8,6 +8,13 @@ jest.mock('../lib/event-actions', () => ({
   listEvents: jest.fn(),
 }));
 
+jest.mock('../lib/friend-actions', () => ({
+  listFriendships: jest.fn().mockResolvedValue({
+    data: { friends: [], incoming: [], outgoing: [] },
+    error: null,
+  }),
+}));
+
 jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
 }));
