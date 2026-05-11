@@ -27,6 +27,7 @@ import {
   createUnavailableDay,
   deleteBusyBlock,
   deleteUnavailableDay,
+  skipBusyBlockOccurrence,
   updateBusyBlock,
   updateUnavailableDay,
 } from '../lib/availability-actions';
@@ -507,7 +508,16 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   function handleDelete() {
     setMenuOpen(false);
     if (!editing || submitting) return;
-    Alert.alert('Delete this item?', undefined, [
+    // For a recurring busy_block, "Delete event" means delete the
+    // entire SERIES (the popover offers a separate "Delete this
+    // occurrence" entry that writes a skip exception instead). Make
+    // the confirmation copy clear about which one's about to happen.
+    const isRecurringBusy =
+      editing.kind === 'busy_block' && !!editing.recurrenceRule;
+    const confirmTitle = isRecurringBusy
+      ? 'Delete the entire series?'
+      : 'Delete this item?';
+    Alert.alert(confirmTitle, undefined, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -518,7 +528,48 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
             const { error } =
               editing.kind === 'busy_block'
                 ? await deleteBusyBlock(editing.id)
-                : await deleteUnavailableDay({ userId: editing.user.id, date: editing.date });
+                : await deleteUnavailableDay({
+                    userId: editing.user.id,
+                    // For a recurring unavailable_day occurrence, the
+                    // PK is `(user_id, seriesDate)` — fall back to
+                    // `date` for one-offs (where the two are equal).
+                    date: editing.seriesDate ?? editing.date,
+                  });
+            if (error) {
+              toast.error(error);
+              return;
+            }
+            onSaved();
+            onClose();
+          } finally {
+            setSubmitting(false);
+          }
+        },
+      },
+    ]);
+  }
+
+  /** Skip just THIS occurrence of a recurring busy_block series. The
+   * series row stays put — only the tapped occurrence's date is hidden
+   * from `listCalendarItems` going forward. v4 supports skip on
+   * busy_blocks only; recurring unavailable_day exceptions ship in a
+   * follow-up. */
+  function handleSkipOccurrence() {
+    setMenuOpen(false);
+    if (!editing || submitting || editing.kind !== 'busy_block') return;
+    if (!editing.recurrenceRule) return;
+    Alert.alert('Delete this occurrence?', 'The rest of the series will stay.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setSubmitting(true);
+          try {
+            const { error } = await skipBusyBlockOccurrence({
+              seriesId: editing.id,
+              originalStart: editing.startsAt,
+            });
             if (error) {
               toast.error(error);
               return;
@@ -969,14 +1020,41 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                   <Text style={styles.menuItemLabel}>Copy event</Text>
                 </Pressable>
               ) : null}
+              {editing.kind === 'busy_block' && editing.recurrenceRule ? (
+                // Recurring busy_blocks get TWO delete options: just
+                // this occurrence (writes a skip exception) or the
+                // entire series (deletes the base row + cascades
+                // exceptions). Without splitting these the user has no
+                // way to surgically remove a single Wednesday from
+                // their "every Wed" yoga series.
+                <Pressable
+                  onPress={handleSkipOccurrence}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete this occurrence"
+                  testID="event-menu-skip"
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                >
+                  <Text style={[styles.menuItemLabel, styles.menuItemDanger]}>
+                    Delete this occurrence
+                  </Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={handleDelete}
                 accessibilityRole="button"
-                accessibilityLabel="Delete event"
+                accessibilityLabel={
+                  editing.kind === 'busy_block' && editing.recurrenceRule
+                    ? 'Delete entire series'
+                    : 'Delete event'
+                }
                 testID="event-menu-delete"
                 style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
               >
-                <Text style={[styles.menuItemLabel, styles.menuItemDanger]}>Delete event</Text>
+                <Text style={[styles.menuItemLabel, styles.menuItemDanger]}>
+                  {editing.kind === 'busy_block' && editing.recurrenceRule
+                    ? 'Delete entire series'
+                    : 'Delete event'}
+                </Text>
               </Pressable>
             </View>
           </>

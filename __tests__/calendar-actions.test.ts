@@ -10,7 +10,7 @@ const mockSupabase = supabase as unknown as { from: jest.Mock };
 function chainable(resolved: unknown) {
   const builder: Record<string, jest.Mock> = {};
   const terminal = Promise.resolve(resolved);
-  for (const name of ['select', 'gte', 'gt', 'lt', 'or']) {
+  for (const name of ['select', 'gte', 'gt', 'lt', 'or', 'in']) {
     builder[name] = jest.fn().mockReturnValue(builder);
   }
   (builder as { then: unknown }).then = (onFulfilled: unknown, onRejected: unknown) =>
@@ -210,6 +210,9 @@ describe('listCalendarItems', () => {
             error: null,
           }),
         )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        // 3rd mock for the busy_block_exceptions query (added in v4
+        // for per-occurrence skip overrides). Empty = no skips applied.
         .mockImplementationOnce(() => chainable({ data: [], error: null }));
 
       const { data, error } = await listCalendarItems({
@@ -254,6 +257,7 @@ describe('listCalendarItems', () => {
             error: null,
           }),
         )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
         .mockImplementationOnce(() => chainable({ data: [], error: null }));
 
       const { data, error } = await listCalendarItems({
@@ -323,6 +327,7 @@ describe('listCalendarItems', () => {
             error: null,
           }),
         )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
         .mockImplementationOnce(() => chainable({ data: [], error: null }));
 
       const { data } = await listCalendarItems({
@@ -334,6 +339,133 @@ describe('listCalendarItems', () => {
       const item = data?.[0];
       if (item?.kind !== 'busy_block') throw new Error('expected busy_block');
       expect(item.startsAt.getDate()).toBe(18);
+    });
+  });
+
+  describe('per-occurrence exceptions', () => {
+    it('queries busy_block_exceptions and skips occurrences whose original_start matches a "skip" exception', async () => {
+      // Series: Mon May 11 2026 14:00 weekly. Window: 3 weeks (May 11 →
+      // June 1) → expects May 11, 18, 25. Exception skips May 18.
+      // Result: only May 11 and May 25.
+      const exceptionsBuilder = chainable({
+        data: [
+          {
+            series_id: 'series1',
+            original_start: '2026-05-18T21:00:00.000Z',
+            action: 'skip',
+          },
+        ],
+        error: null,
+      });
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'series1',
+                user_id: alice.id,
+                title: 'Yoga',
+                starts_at: '2026-05-11T21:00:00.000Z',
+                ends_at: '2026-05-11T22:00:00.000Z',
+                notes: null,
+                location: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() => exceptionsBuilder);
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenNthCalledWith(3, 'busy_block_exceptions');
+      // The exceptions query loads exceptions for the SERIES we just
+      // saw — uses .in('series_id', [...]) to scope.
+      expect(exceptionsBuilder.in).toHaveBeenCalledWith('series_id', ['series1']);
+
+      const dates = (data ?? [])
+        .filter((i) => i.kind === 'busy_block')
+        .map((i) => (i.kind === 'busy_block' ? i.startsAt.getDate() : -1));
+      expect(dates).toEqual([11, 25]);
+    });
+
+    it('does not query busy_block_exceptions when there are no recurring series in the result', async () => {
+      // No recurring series → no need to query the exceptions table.
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'oneoff',
+                user_id: alice.id,
+                title: 'Lunch',
+                starts_at: '2026-05-13T19:00:00.000Z',
+                ends_at: '2026-05-13T20:00:00.000Z',
+                notes: null,
+                location: null,
+                recurrence_rule: null,
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
+
+      await listCalendarItems({ fromDate: '2026-05-13', toDate: '2026-05-14' });
+
+      // Only 2 .from() calls — busy_blocks, unavailable_days. The
+      // exceptions table is never hit.
+      expect(mockSupabase.from).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not crash when the exceptions query fails — falls back to unfiltered occurrences', async () => {
+      // We DON'T fail the whole listCalendarItems call if exceptions
+      // can't be loaded. Showing all occurrences (with the deleted
+      // one mistakenly visible) is preferable to showing nothing.
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'series1',
+                user_id: alice.id,
+                title: 'Yoga',
+                starts_at: '2026-05-11T21:00:00.000Z',
+                ends_at: '2026-05-11T22:00:00.000Z',
+                notes: null,
+                location: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({ data: null, error: { message: 'exceptions table boom' } }),
+        );
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      // Calendar still renders — error swallowed.
+      expect(error).toBeNull();
+      const dates = (data ?? [])
+        .filter((i) => i.kind === 'busy_block')
+        .map((i) => (i.kind === 'busy_block' ? i.startsAt.getDate() : -1));
+      // All 3 occurrences shown — no exception applied.
+      expect(dates).toEqual([11, 18, 25]);
     });
   });
 

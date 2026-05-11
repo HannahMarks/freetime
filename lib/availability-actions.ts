@@ -138,6 +138,47 @@ export async function deleteBusyBlock(id: string): Promise<ActionResult> {
   return { error: null };
 }
 
+/**
+ * Insert a `skip` exception for a single occurrence of a recurring
+ * busy_block series. The series row stays put — only this one
+ * occurrence is hidden from `listCalendarItems`.
+ *
+ * `originalStart` MUST exactly match the timestamp the parent series's
+ * `expandOccurrences` would emit for that occurrence — the
+ * client-side filter compares ISO strings. The CalendarItem's
+ * `startsAt` (the value displayed on the timeline) is exactly this
+ * value, so callers can pass it through.
+ *
+ * Idempotent on conflict — the unique PK is
+ * (series_id, original_start), so re-inserting the same skip is a
+ * no-op (we upsert rather than ignoring the conflict so an existing
+ * 'move' exception on the same occurrence gets converted to 'skip').
+ */
+export async function skipBusyBlockOccurrence(args: {
+  seriesId: string;
+  originalStart: Date;
+}): Promise<ActionResult> {
+  const { error } = await supabase
+    .from('busy_block_exceptions')
+    .upsert(
+      {
+        series_id: args.seriesId,
+        original_start: args.originalStart.toISOString(),
+        action: 'skip',
+        // Explicit null on new_start / new_end — the table's CHECK
+        // constraint requires both to be null when action='skip'. If
+        // we left them undefined, an upsert from an existing 'move'
+        // row would carry the old new_* values and trip the check.
+        new_start: null,
+        new_end: null,
+      },
+      { onConflict: 'series_id,original_start' },
+    );
+
+  if (error) return { error: describeError("Couldn't skip this occurrence", error) };
+  return { error: null };
+}
+
 export async function deleteUnavailableDay(args: {
   userId: string;
   date: string;

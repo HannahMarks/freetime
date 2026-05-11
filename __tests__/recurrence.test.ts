@@ -261,6 +261,79 @@ describe('expandOccurrences (until)', () => {
   });
 });
 
+describe('expandOccurrences (skipKeys)', () => {
+  // Mon May 11 2026 14:00 → 15:00 series. We pass a `skipKeys` set
+  // containing the ISO timestamp of one occurrence; that occurrence
+  // should be omitted from the output, all others preserved.
+  const baseStart = new Date(2026, 4, 11, 14, 0);
+  const baseEnd = new Date(2026, 4, 11, 15, 0);
+  const rule: RecurrenceRule = { freq: 'weekly' };
+
+  it('omits an occurrence whose ISO start matches a skipKey', () => {
+    // Skip May 18.
+    const may18 = new Date(2026, 4, 18, 14, 0);
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 5, 8, 0, 0),
+      skipKeys: new Set([may18.toISOString()]),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11, 25, 1]);
+  });
+
+  it('omits multiple skipped occurrences', () => {
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 5, 8, 0, 0),
+      skipKeys: new Set([
+        new Date(2026, 4, 11, 14, 0).toISOString(),
+        new Date(2026, 4, 25, 14, 0).toISOString(),
+      ]),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([18, 1]);
+  });
+
+  it('treats an empty / undefined skipKeys set as no skips (preserves v1/v2 behavior)', () => {
+    const a = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 5, 8, 0, 0),
+    });
+    const b = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 5, 8, 0, 0),
+      skipKeys: new Set(),
+    });
+    expect(a.map((o) => o.startsAt.getTime())).toEqual(b.map((o) => o.startsAt.getTime()));
+  });
+
+  it('skipKey lookup uses ISO string (not Date instance), so callers can match on row data', () => {
+    // Construct two skip targets with the same wall-clock time but
+    // built two different ways — they should both match by ISO.
+    const may18a = new Date(2026, 4, 18, 14, 0);
+    const may18b = new Date(may18a.toISOString()); // round-trip
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+      skipKeys: new Set([may18b.toISOString()]),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11]);
+  });
+});
+
 describe('isRecurrenceRule (extended shapes)', () => {
   it('accepts a rule with byDay', () => {
     expect(isRecurrenceRule({ freq: 'weekly', byDay: [1, 3] })).toBe(true);

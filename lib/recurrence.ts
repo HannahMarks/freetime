@@ -92,6 +92,12 @@ export function expandOccurrences(args: {
   baseEnd: Date;
   rangeStart: Date; // inclusive
   rangeEnd: Date;   // exclusive
+  /** Optional set of `startsAt.toISOString()` keys to omit from the
+   * output. Used by `listCalendarItems` to apply per-occurrence skip
+   * exceptions (`busy_block_exceptions` rows with `action='skip'`).
+   * Each key is an exact ISO timestamp; the helper compares against
+   * `occurrence.startsAt.toISOString()`. */
+  skipKeys?: Set<string>;
 }): Array<{ startsAt: Date; endsAt: Date }> {
   if (args.rule.freq !== 'weekly') return [];
 
@@ -167,6 +173,11 @@ export function expandOccurrences(args: {
       // Skip occurrences whose interval ends at-or-before rangeStart
       // (they're before the requested window).
       if (endMs <= rangeStartMs) continue;
+      // Per-occurrence skip exception lookup. Compares against
+      // `start.toISOString()` so callers (listCalendarItems) can
+      // build the set from `busy_block_exceptions.original_start`
+      // raw timestamps without parsing them into Date instances.
+      if (args.skipKeys && args.skipKeys.has(start.toISOString())) continue;
       out.push({ startsAt: start, endsAt: new Date(endMs) });
       if (out.length >= MAX_OCCURRENCES) return out;
     }
