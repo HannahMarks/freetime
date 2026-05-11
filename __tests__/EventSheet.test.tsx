@@ -10,6 +10,7 @@ jest.mock('../lib/event-actions', () => ({
   updateEvent: jest.fn(),
   deleteEvent: jest.fn(),
   inviteFriends: jest.fn(),
+  respondToInvite: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -326,6 +327,113 @@ describe('EventSheet', () => {
       // refetches so the new event shows up.
       await waitFor(() => expect(onSaved).toHaveBeenCalled());
       await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+  });
+
+  describe('invitee RSVP (H5a)', () => {
+    const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
+    const meProfile = { id: 'me-id', display_name: 'Me', color: '#9C27B0' };
+    // An event ALICE is hosting and I'M invited to — i.e., I'm an
+    // invitee, not the host. The attendees list includes my row so
+    // the sheet can pre-fill my current RSVP.
+    const eventImInvitedTo: EventItem = {
+      kind: 'event',
+      id: 'ev-invited',
+      owner: alice,
+      startsAt: new Date(2026, 4, 20, 18, 0),
+      endsAt: new Date(2026, 4, 20, 21, 0),
+      title: "Alice's party",
+      notes: null,
+      location: null,
+      attendees: [{ invitee: meProfile, status: 'pending' }],
+    };
+
+    it('renders Accept / Decline / Maybe pills when I am NOT the host', () => {
+      render(<EventSheet {...baseProps} editing={eventImInvitedTo} currentUserId="me-id" />);
+      expect(screen.getByTestId('rsvp-pills')).toBeOnTheScreen();
+      expect(screen.getByTestId('rsvp-accepted')).toBeOnTheScreen();
+      expect(screen.getByTestId('rsvp-declined')).toBeOnTheScreen();
+      expect(screen.getByTestId('rsvp-maybe')).toBeOnTheScreen();
+    });
+
+    it('hides pencil + trash icons when I am NOT the host', () => {
+      render(<EventSheet {...baseProps} editing={eventImInvitedTo} currentUserId="me-id" />);
+      expect(screen.queryByTestId('event-sheet-edit')).toBeNull();
+      expect(screen.queryByTestId('event-sheet-delete')).toBeNull();
+    });
+
+    it('shows pencil + trash AND hides RSVP pills when I AM the host', () => {
+      const myEvent: EventItem = { ...eventImInvitedTo, owner: meProfile };
+      render(<EventSheet {...baseProps} editing={myEvent} currentUserId="me-id" />);
+      expect(screen.getByTestId('event-sheet-edit')).toBeOnTheScreen();
+      expect(screen.getByTestId('event-sheet-delete')).toBeOnTheScreen();
+      expect(screen.queryByTestId('rsvp-pills')).toBeNull();
+    });
+
+    it('hides RSVP pills when I am NOT the host AND I am NOT in the attendees list (someone else\'s event a friend can see)', () => {
+      const friendsEvent: EventItem = { ...eventImInvitedTo, attendees: [] };
+      render(<EventSheet {...baseProps} editing={friendsEvent} currentUserId="me-id" />);
+      expect(screen.queryByTestId('rsvp-pills')).toBeNull();
+    });
+
+    it('marks the currently-selected RSVP pill via accessibilityState', () => {
+      const editing: EventItem = {
+        ...eventImInvitedTo,
+        attendees: [{ invitee: meProfile, status: 'accepted' }],
+      };
+      render(<EventSheet {...baseProps} editing={editing} currentUserId="me-id" />);
+      expect(screen.getByTestId('rsvp-accepted').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('rsvp-declined').props.accessibilityState.selected).toBe(false);
+      expect(screen.getByTestId('rsvp-maybe').props.accessibilityState.selected).toBe(false);
+    });
+
+    it('tapping a pill calls respondToInvite with the new status and closes the sheet', async () => {
+      const mockedRespond = jest.requireMock('../lib/event-actions').respondToInvite as jest.Mock;
+      mockedRespond.mockResolvedValue({ error: null });
+      const onSaved = jest.fn();
+      const onClose = jest.fn();
+
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventImInvitedTo}
+          currentUserId="me-id"
+          onSaved={onSaved}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.press(screen.getByTestId('rsvp-accepted'));
+
+      await waitFor(() =>
+        expect(mockedRespond).toHaveBeenCalledWith({
+          eventId: 'ev-invited',
+          status: 'accepted',
+        }),
+      );
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+
+    it('toasts and stays open on respondToInvite error', async () => {
+      const mockedRespond = jest.requireMock('../lib/event-actions').respondToInvite as jest.Mock;
+      mockedRespond.mockResolvedValue({ error: "Couldn't update your RSVP. Please try again." });
+      const onSaved = jest.fn();
+      const onClose = jest.fn();
+
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventImInvitedTo}
+          currentUserId="me-id"
+          onSaved={onSaved}
+          onClose={onClose}
+        />,
+      );
+      fireEvent.press(screen.getByTestId('rsvp-declined'));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/rsvp/i)));
+      expect(onSaved).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 

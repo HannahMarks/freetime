@@ -186,6 +186,35 @@ export async function listEvents(args: {
  * surface as errors (the host UI prevents this from being a normal
  * code path, but we don't want to silently swallow them).
  */
+/**
+ * Set the calling user's RSVP status on an event they're invited to.
+ * RLS enforces `invitee_id = auth.uid()` on UPDATE, so the action
+ * can't be used to change someone else's RSVP — but we still do an
+ * explicit `.eq('invitee_id', user.id)` so the row-targeting is
+ * visible at the call site too.
+ *
+ * Returns a friendly error string on failure (network blip, RLS
+ * mismatch from a stale session, etc).
+ */
+export async function respondToInvite(args: {
+  eventId: string;
+  status: EventInviteStatus;
+}): Promise<ActionResult> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: 'Not signed in.' };
+
+  const { error } = await supabase
+    .from('event_invites')
+    .update({ status: args.status })
+    .eq('event_id', args.eventId)
+    .eq('invitee_id', user.id);
+
+  if (error) return { error: describeError("Couldn't update your RSVP", error) };
+  return { error: null };
+}
+
 export async function inviteFriends(args: {
   eventId: string;
   inviteeIds: string[];

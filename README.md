@@ -138,7 +138,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - 🚧 Create event flow (H2) — Events tab with a chronological list of upcoming events (out to 6 months) + a profile-color FAB that opens an `EventSheet` (create / view / pencil-to-edit / trash-to-delete; same animation + swipe-down posture as `AddItemSheet`, no recurrence or kind-toggle). Tab icon is a manual-drawn 4-point spark
 - 🚧 `event_invites` schema (H3) — composite PK `(event_id, invitee_id)`, `event_invite_status` enum (pending/accepted/declined/maybe), RLS (host can insert + see-all-on-their-event, invitee can update own status, either party can delete). `events.SELECT` policy extended to include rows the user is invited to. Trigger blocks self-invites
 - 🚧 Invite picker on the create flow (H4) — `EventSheet` create mode renders a chip-row of accepted friends (multi-select, friend-color border + selection tint); on Save, `createEvent` returns the new id and the sheet chains `inviteFriends({eventId, inviteeIds})`. `listEvents` joins `event_invites` + invitee profiles so each `EventItem.attendees` is populated. View mode renders an "Invited" row listing names + non-pending status suffixes. Edit-mode add/remove deferred to H5
-- ⏳ RSVP UI; surfaces who can make it from each invited friend's availability (H5)
+- 🚧 Invitee RSVP (H5a) — `respondToInvite({eventId, status})` action. `EventSheet` accepts `currentUserId` and routes the view: host (owner === current user) sees pencil + trash; invitee (not host, has an attendee row) sees three pills — Going / Can't go / Maybe — with the current RSVP filled. Tap a pill → action call → close + parent refetch
+- ⏳ Event-detail add/remove invitees (H5b); accepted-events overlay on the calendar (H5c)
 
 ### Phase 3 — per-event photo albums
 

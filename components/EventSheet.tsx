@@ -28,9 +28,10 @@ import {
   createEvent,
   deleteEvent,
   inviteFriends,
+  respondToInvite,
   updateEvent,
 } from '../lib/event-actions';
-import type { EventItem } from '../lib/event-helpers';
+import type { EventInviteStatus, EventItem } from '../lib/event-helpers';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
@@ -58,6 +59,11 @@ type Props = {
    * friends action layer directly. Empty array is fine — the picker
    * just renders an empty state. */
   friends?: FriendProfile[];
+  /** The signed-in user's id. Used to decide whether the sheet shows
+   * host controls (pencil + trash on the editing item) OR invitee
+   * controls (RSVP pills). When omitted, the sheet defaults to host
+   * mode — tests that don't care about RSVP can skip this prop. */
+  currentUserId?: string;
   onClose: () => void;
   /** Fires after a successful save OR delete. Parent should refetch. */
   onSaved: () => void;
@@ -134,6 +140,7 @@ export function EventSheet({
   defaultDate,
   editing,
   friends,
+  currentUserId,
   onClose,
   onSaved,
 }: Props) {
@@ -338,6 +345,35 @@ export function EventSheet({
     : inViewMode
       ? (editing.title ?? '')
       : 'Edit event';
+  // Role gating for the controls. When the user is the HOST of the
+  // event they're viewing, the header shows pencil + trash and the
+  // pencil opens the edit form. When they're an INVITEE (not the
+  // host, but they have an invite row), the header hides those
+  // controls and the body shows RSVP pills instead. Defaults to host
+  // mode when `currentUserId` is omitted (e.g. in some tests).
+  const isHost = !editing || !currentUserId || editing.owner.id === currentUserId;
+  // The user's own attendee row, if any. Used to (a) decide whether
+  // to show RSVP pills (only if there IS an invite for them) and
+  // (b) highlight the currently-selected status.
+  const myRsvp = editing?.attendees?.find(
+    (a) => currentUserId !== undefined && a.invitee.id === currentUserId,
+  );
+
+  async function handleRespond(status: EventInviteStatus) {
+    if (!editing || submitting) return;
+    setSubmitting(true);
+    try {
+      const { error } = await respondToInvite({ eventId: editing.id, status });
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      onSaved();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   const viewDate = editing ? formatLongDate(editing.startsAt) : null;
   const viewTimeRange = editing ? formatTimeRange(editing.startsAt, editing.endsAt) : null;
@@ -377,7 +413,10 @@ export function EventSheet({
                 <Text style={styles.closeIcon}>×</Text>
               </Pressable>
               <Text style={styles.heading} numberOfLines={1}>{heading}</Text>
-              {editing ? (
+              {editing && isHost ? (
+                // Host of this event in view mode — show pencil + trash.
+                // Hidden for invitees (they get RSVP pills in the body
+                // instead) and in edit mode (no buttons needed there).
                 <View style={styles.headerRight}>
                   {inViewMode ? (
                     <>
@@ -460,6 +499,59 @@ export function EventSheet({
                           )
                           .join(', ')}
                       </Text>
+                    </View>
+                  ) : null}
+                  {/* Invitee RSVP pills. Visible only when the user
+                      is NOT the host AND has an invite row on this
+                      event. Tapping a pill flips their RSVP via
+                      `respondToInvite` and closes the sheet — the
+                      parent refetches on `onSaved` so the list re-
+                      renders with the new status. The currently-
+                      selected pill is filled (dark). */}
+                  {editing && !isHost && myRsvp ? (
+                    <View style={styles.viewRow} testID="rsvp-pills">
+                      <Text style={styles.viewLabel}>Your RSVP</Text>
+                      <View style={styles.rsvpRow}>
+                        {(['accepted', 'declined', 'maybe'] as const).map((status) => {
+                          const isCurrent = myRsvp.status === status;
+                          return (
+                            <Pressable
+                              key={status}
+                              onPress={() => handleRespond(status)}
+                              accessibilityRole="button"
+                              accessibilityLabel={
+                                status === 'accepted'
+                                  ? "I'm going"
+                                  : status === 'declined'
+                                    ? "Can't make it"
+                                    : 'Maybe'
+                              }
+                              accessibilityState={{ selected: isCurrent }}
+                              testID={`rsvp-${status}`}
+                              disabled={submitting}
+                              style={({ pressed }) => [
+                                styles.rsvpPill,
+                                isCurrent && styles.rsvpPillSelected,
+                                pressed && !submitting && styles.rsvpPillPressed,
+                              ]}
+                            >
+                              <Text
+                                style={
+                                  isCurrent
+                                    ? styles.rsvpPillLabelSelected
+                                    : styles.rsvpPillLabel
+                                }
+                              >
+                                {status === 'accepted'
+                                  ? 'Going'
+                                  : status === 'declined'
+                                    ? "Can't go"
+                                    : 'Maybe'}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
                     </View>
                   ) : null}
                 </ScrollView>
@@ -757,4 +849,20 @@ const styles = StyleSheet.create({
   inviteChipLabel: { fontSize: 13, color: '#444' },
   inviteChipLabelSelected: { fontSize: 13, color: '#111', fontWeight: '600' },
   inviteEmpty: { fontSize: 13, color: '#888', lineHeight: 18 },
+  // Invitee RSVP pills. Three side-by-side rounded buttons; the
+  // currently-selected one fills (dark bg + white text) for an
+  // unambiguous "this is my RSVP" affordance.
+  rsvpRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  rsvpPill: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+  },
+  rsvpPillSelected: { backgroundColor: '#111', borderColor: '#111' },
+  rsvpPillPressed: { opacity: 0.7 },
+  rsvpPillLabel: { fontSize: 14, color: '#444' },
+  rsvpPillLabelSelected: { fontSize: 14, color: '#fff', fontWeight: '600' },
 });
