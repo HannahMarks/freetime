@@ -32,13 +32,13 @@ set local role postgres;
 
 insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, aud, role)
 values
-  ('00000000-0000-0000-0000-0000000000g1', 'gus@example.test', '', now(),
+  ('00000000-0000-0000-0000-00000000000c', 'gus@example.test', '', now(),
    '{"display_name":"Gus","color":"#3F51B5"}'::jsonb, 'authenticated', 'authenticated');
 
 insert into public.busy_blocks (id, user_id, title, starts_at, ends_at, recurrence_rule)
 values (
   '00000000-0000-0000-0000-00000000bbf1',
-  '00000000-0000-0000-0000-0000000000g1',
+  '00000000-0000-0000-0000-00000000000c',
   'Yoga',
   '2026-05-11 14:00:00+00',
   '2026-05-11 15:00:00+00',
