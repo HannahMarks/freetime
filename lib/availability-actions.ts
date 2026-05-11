@@ -1,3 +1,4 @@
+import type { RecurrenceRule } from './recurrence';
 import { supabase } from './supabase';
 
 export type ActionResult = { error: string | null };
@@ -21,6 +22,10 @@ export async function createBusyBlock(args: {
   title: string | null;
   notes: string | null;
   location: string | null;
+  /** Optional. When set, the block is the FIRST occurrence of a
+   * repeating series; later occurrences are expanded client-side by
+   * `expandOccurrences`. Defaults to a one-off (null). */
+  recurrenceRule?: RecurrenceRule | null;
 }): Promise<ActionResult> {
   const {
     data: { user },
@@ -34,6 +39,10 @@ export async function createBusyBlock(args: {
     ends_at: args.endsAt.toISOString(),
     notes: args.notes,
     location: args.location,
+    // Always include the column explicitly — `undefined` would let the
+    // DB keep an existing value on PATCH-style upserts; explicit null
+    // matches the "this is a one-off" semantics.
+    recurrence_rule: args.recurrenceRule ?? null,
   });
 
   if (error) return { error: describeError("Couldn't add activity", error) };
@@ -73,6 +82,10 @@ export async function updateBusyBlock(args: {
   title: string | null;
   notes: string | null;
   location: string | null;
+  /** Optional. When set, replaces the existing rule (turns a one-off
+   * into a series, or vice versa, or rewrites the rule). When omitted,
+   * the column is set to null — i.e. "save without recurrence". */
+  recurrenceRule?: RecurrenceRule | null;
 }): Promise<ActionResult> {
   const { error } = await supabase
     .from('busy_blocks')
@@ -82,6 +95,7 @@ export async function updateBusyBlock(args: {
       ends_at: args.endsAt.toISOString(),
       notes: args.notes,
       location: args.location,
+      recurrence_rule: args.recurrenceRule ?? null,
     })
     .eq('id', args.id);
 

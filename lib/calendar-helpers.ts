@@ -2,6 +2,8 @@
 // No React, no Supabase — just date math and shape transforms so they're
 // trivially testable.
 
+import type { RecurrenceRule } from './recurrence';
+
 export type FriendProfile = {
   id: string;
   display_name: string;
@@ -10,6 +12,10 @@ export type FriendProfile = {
 
 export type BusyBlockItem = {
   kind: 'busy_block';
+  /** DB id. Identical for every occurrence of a recurring series — UI
+   * keys that need uniqueness across occurrences should combine `id`
+   * with `startsAt.getTime()` (DayTimeline already does this for its
+   * BusyBlockOverlay key). */
   id: string;
   user: FriendProfile;
   startsAt: Date;
@@ -17,6 +23,12 @@ export type BusyBlockItem = {
   title: string | null;
   notes: string | null;
   location: string | null;
+  /** Non-null when this item is one occurrence of a repeating series.
+   * The same rule appears on every expanded occurrence. Optional in
+   * the type only so legacy test fixtures don't all need updating —
+   * production builders (`listCalendarItems`) always set it
+   * explicitly to `null` for one-off blocks. */
+  recurrenceRule?: RecurrenceRule | null;
 };
 
 export type UnavailableDayItem = {

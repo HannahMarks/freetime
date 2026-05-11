@@ -10,7 +10,7 @@ const mockSupabase = supabase as unknown as { from: jest.Mock };
 function chainable(resolved: unknown) {
   const builder: Record<string, jest.Mock> = {};
   const terminal = Promise.resolve(resolved);
-  for (const name of ['select', 'gte', 'gt', 'lt']) {
+  for (const name of ['select', 'gte', 'gt', 'lt', 'or']) {
     builder[name] = jest.fn().mockReturnValue(builder);
   }
   (builder as { then: unknown }).then = (onFulfilled: unknown, onRejected: unknown) =>
@@ -78,18 +78,24 @@ describe('listCalendarItems', () => {
     expect(error).toBeNull();
     expect(mockSupabase.from).toHaveBeenNthCalledWith(1, 'busy_blocks');
     expect(mockSupabase.from).toHaveBeenNthCalledWith(2, 'unavailable_days');
-    // Overlap query: a block belongs to the window when it starts before
-    // window-end AND ends after window-start. This catches multi-day blocks
-    // that began before fromDate but extend into the range.
+    // Combined predicate: `starts_at < toDate` (always required — no
+    // future-only series) AND (`ends_at > fromDate` OR row is recurring).
+    // The OR's recurring branch lets us pull series whose first
+    // occurrence is in the past so they can be expanded forward into
+    // the window.
     expect(busyBuilder.lt).toHaveBeenCalledWith('starts_at', '2026-05-20');
-    expect(busyBuilder.gt).toHaveBeenCalledWith('ends_at', '2026-05-13');
+    expect(busyBuilder.or).toHaveBeenCalledWith(
+      expect.stringMatching(/ends_at\.gt\.2026-05-13.*recurrence_rule\.not\.is\.null/),
+    );
     expect(daysBuilder.gte).toHaveBeenCalledWith('date', '2026-05-13');
     expect(daysBuilder.lt).toHaveBeenCalledWith('date', '2026-05-20');
 
     // The select clauses must request notes + location so they're available
-    // client-side without a second round-trip.
+    // client-side without a second round-trip. recurrence_rule is in there
+    // too so the client can expand series without an extra query.
     expect(busyBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/notes/));
     expect(busyBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/location/));
+    expect(busyBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/recurrence_rule/));
     expect(daysBuilder.select).toHaveBeenCalledWith(expect.stringMatching(/notes/));
 
     expect(data).toHaveLength(2);
@@ -174,5 +180,155 @@ describe('listCalendarItems', () => {
     });
     expect(error).toBeNull();
     expect(data).toEqual([]);
+  });
+
+  describe('recurring busy_blocks', () => {
+    it('expands a weekly recurring series into one item per occurrence in the window', async () => {
+      // Base: Mon May 11 2026 14:00 → 15:00. Window: May 11 → June 1 (3 weeks).
+      // Expect 3 occurrences: May 11, May 18, May 25.
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'series1',
+                user_id: alice.id,
+                title: 'Yoga',
+                starts_at: '2026-05-11T21:00:00Z', // 14:00 PDT
+                ends_at: '2026-05-11T22:00:00Z',
+                notes: null,
+                location: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      expect(error).toBeNull();
+      expect(data).toHaveLength(3);
+      const dates = (data ?? []).map((i) => (i.kind === 'busy_block' ? i.startsAt.getDate() : -1));
+      expect(dates).toEqual([11, 18, 25]);
+      // Every expanded occurrence carries the original recurrence rule
+      // and the original DB id (DayTimeline keys by id + startsAt for
+      // React uniqueness across siblings).
+      for (const item of data ?? []) {
+        if (item.kind !== 'busy_block') continue;
+        expect(item.id).toBe('series1');
+        expect(item.recurrenceRule).toEqual({ freq: 'weekly' });
+        expect(item.title).toBe('Yoga');
+      }
+    });
+
+    it('also expands series whose base falls before the window (only in-window occurrences are returned)', async () => {
+      // Base: Mon Jan 5 2026 14:00. Window: May 11 → June 1.
+      // Expect just the May 2026 Mondays in range: May 11, 18, 25.
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'series1',
+                user_id: alice.id,
+                title: 'Standup',
+                starts_at: '2026-01-05T22:00:00Z', // 14:00 PST (before DST)
+                ends_at: '2026-01-05T23:00:00Z',
+                notes: null,
+                location: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      expect(error).toBeNull();
+      expect(data).toHaveLength(3);
+      const dates = (data ?? []).map((i) => (i.kind === 'busy_block' ? i.startsAt.getDate() : -1));
+      expect(dates.sort((a, b) => a - b)).toEqual([11, 18, 25]);
+    });
+
+    it('returns recurrenceRule: null on non-recurring busy_blocks', async () => {
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'oneoff',
+                user_id: alice.id,
+                title: 'Lunch',
+                starts_at: '2026-05-13T19:00:00Z',
+                ends_at: '2026-05-13T20:00:00Z',
+                notes: null,
+                location: null,
+                recurrence_rule: null,
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
+
+      const { data } = await listCalendarItems({
+        fromDate: '2026-05-13',
+        toDate: '2026-05-14',
+      });
+
+      expect(data).toHaveLength(1);
+      const item = data?.[0];
+      if (item?.kind !== 'busy_block') throw new Error('expected busy_block');
+      expect(item.recurrenceRule).toBeNull();
+    });
+
+    it('does not include occurrences outside the requested window', async () => {
+      // Base: Mon May 11 2026 14:00. Window: May 18 → May 25 only (one week).
+      // Expect just the May 18 occurrence — May 11 is before window-start,
+      // May 25 is at window-end (exclusive).
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'series1',
+                user_id: alice.id,
+                title: 'Yoga',
+                starts_at: '2026-05-11T21:00:00Z',
+                ends_at: '2026-05-11T22:00:00Z',
+                notes: null,
+                location: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
+
+      const { data } = await listCalendarItems({
+        fromDate: '2026-05-18',
+        toDate: '2026-05-25',
+      });
+
+      expect(data).toHaveLength(1);
+      const item = data?.[0];
+      if (item?.kind !== 'busy_block') throw new Error('expected busy_block');
+      expect(item.startsAt.getDate()).toBe(18);
+    });
   });
 });

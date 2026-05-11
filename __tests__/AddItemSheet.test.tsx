@@ -713,6 +713,115 @@ describe('AddItemSheet', () => {
     });
   });
 
+  describe('weekly recurrence', () => {
+    it('passes recurrenceRule = { freq: "weekly" } when the toggle is on at create-time', async () => {
+      mockedCreateBusy.mockResolvedValue({ error: null });
+      render(<AddItemSheet {...baseProps} />);
+
+      // Toggle on, then save — busy mode (default), default times.
+      fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+      const call = mockedCreateBusy.mock.calls[0][0];
+      expect(call.recurrenceRule).toEqual({ freq: 'weekly' });
+    });
+
+    it('omits recurrenceRule when the toggle is off (default)', async () => {
+      mockedCreateBusy.mockResolvedValue({ error: null });
+      render(<AddItemSheet {...baseProps} />);
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+      const call = mockedCreateBusy.mock.calls[0][0];
+      // Either undefined or null is fine — the action defaults to null.
+      expect(call.recurrenceRule ?? null).toBeNull();
+    });
+
+    it('does not show the recurrence toggle in unavailable-day mode (recurring all-day markers are out of v1 scope)', () => {
+      render(<AddItemSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('kind-unavailable'));
+      expect(screen.queryByTestId('repeat-weekly-toggle')).toBeNull();
+    });
+
+    it('view mode shows a "Repeats weekly" line for a recurring item', () => {
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      expect(screen.getByTestId('view-recurrence').props.children).toMatch(/repeats weekly/i);
+    });
+
+    it('view mode does NOT show a recurrence line for a one-off item', () => {
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'oneoff',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Lunch',
+        notes: null,
+        location: null,
+        recurrenceRule: null,
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      expect(screen.queryByTestId('view-recurrence')).toBeNull();
+    });
+
+    it('edit form pre-fills the toggle from the existing item, and updateBusyBlock is called with the rule', async () => {
+      mockedUpdateBusy.mockResolvedValue({ error: null });
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      // Tap pencil to enter edit mode.
+      fireEvent.press(screen.getByTestId('event-edit'));
+      // The toggle should already be on. Tap Save without touching it.
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalled());
+      expect(mockedUpdateBusy.mock.calls[0][0].recurrenceRule).toEqual({ freq: 'weekly' });
+    });
+
+    it('toggling off in edit mode saves the row with recurrenceRule = null (turns the series back into a one-off)', async () => {
+      mockedUpdateBusy.mockResolvedValue({ error: null });
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      fireEvent.press(screen.getByTestId('event-edit'));
+      fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalled());
+      expect(mockedUpdateBusy.mock.calls[0][0].recurrenceRule).toBeNull();
+    });
+  });
+
   it('saves an unavailable_day with the selectedDate and title (notes null when blank)', async () => {
     mockedCreateUnavail.mockResolvedValue({ error: null });
     const onSaved = jest.fn();

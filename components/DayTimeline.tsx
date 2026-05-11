@@ -252,7 +252,11 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
         runOnJS(commit)(snappedMinutes);
       }
     })
-    .enabled(owned && !!onReschedule);
+    // Recurring blocks: drag-to-reschedule is disabled in v1. Moving one
+    // occurrence has ambiguous semantics (just-this-one vs whole series),
+    // and per-occurrence overrides aren't in the schema yet. Editing the
+    // series via the sheet (pencil → edit form) still works.
+    .enabled(owned && !!onReschedule && !block.recurrenceRule);
 
   // Compute the time range to render: original, or the would-land-at
   // range while the user is dragging.
