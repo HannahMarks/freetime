@@ -135,7 +135,7 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 ### Phase 2 — events + invites
 
 - 🚧 Events foundation (H1) — `events` table + RLS (visibility = owner + accepted friends, owner-only mutations) + `EventItem` type + `createEvent` / `listEvents` / `updateEvent` / `deleteEvent` actions. No UI yet — that ships in H2. Visibility extends to "or invited" once `event_invites` lands in H3
-- ⏳ Create event flow (H2) — Events tab + sheet to host an event with title/time/location
+- 🚧 Create event flow (H2) — Events tab with a chronological list of upcoming events (out to 6 months) + a profile-color FAB that opens an `EventSheet` (create / view / pencil-to-edit / trash-to-delete; same animation + swipe-down posture as `AddItemSheet`, no recurrence or kind-toggle). Tab icon is a manual-drawn 4-point spark
 - ⏳ Schema: `event_invites` (H3)
 - ⏳ Invite picker on the create flow (H4)
 - ⏳ RSVP UI; surfaces who can make it from each invited friend's availability (H5)
