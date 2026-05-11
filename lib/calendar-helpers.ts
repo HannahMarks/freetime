@@ -2,6 +2,8 @@
 // No React, no Supabase — just date math and shape transforms so they're
 // trivially testable.
 
+import { darkenHexColor } from './color-helpers';
+import type { EventItem } from './event-helpers';
 import type { RecurrenceRule } from './recurrence';
 
 export type FriendProfile = {
@@ -161,6 +163,69 @@ export function computeMarkings(items: CalendarItem[]): DateMarkings {
     }
   }
   return result;
+}
+
+/**
+ * Build per-date marking dots for events the viewer is associated
+ * with (hosting + accepted invites — the caller decides which list to
+ * pass in). Each day with at least one event gets a single
+ * `key: 'events'` dot in `darken(viewerColor, amount)`. The "events"
+ * key keeps it distinct from the per-user busy-day dots (which use
+ * the user id as their key) so the multi-dot row in the calendar
+ * grid renders one event dot alongside any friend dots without
+ * deduping them out.
+ *
+ * `viewerColor` is the signed-in user's profile color — events
+ * appear in *their* color (darkened) rather than each host's,
+ * matching the spec where the event-FAB outline is in the user's
+ * darker color and the on-calendar dot uses the same value.
+ *
+ * Multi-day events mark every day they span. A midnight cutoff
+ * matches the busy_block helper: an event ending exactly at
+ * 00:00:00.000 does NOT claim the next day.
+ */
+export function computeEventMarkings(
+  events: EventItem[],
+  viewerColor: string | undefined,
+  amount: number,
+): DateMarkings {
+  if (events.length === 0) return {};
+  // Fall back to a non-empty colour (#111 — the app's neutral
+  // accent) when no profile color has loaded yet. Tests rely on
+  // this not throwing when `profile?.color` is undefined.
+  const baseColor = viewerColor ?? '#111';
+  const dotColor = darkenHexColor(baseColor, amount);
+  const result: DateMarkings = {};
+  for (const e of events) {
+    for (const dateKey of spannedDates(e.startsAt, e.endsAt)) {
+      if (!result[dateKey]) result[dateKey] = { dots: [] };
+      if (!result[dateKey].dots.some((d) => d.key === 'events')) {
+        result[dateKey].dots.push({ key: 'events', color: dotColor });
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Merge two `DateMarkings` maps into a new one. When both inputs have
+ * the same date, their dot arrays are concatenated (no de-dup beyond
+ * what each input already did) so the calendar grid renders a row of
+ * mixed friend dots + event dots without collision.
+ */
+export function mergeMarkings(
+  a: DateMarkings,
+  b: DateMarkings,
+): DateMarkings {
+  const out: DateMarkings = { ...a };
+  for (const [date, mark] of Object.entries(b)) {
+    if (!out[date]) {
+      out[date] = { dots: [...mark.dots] };
+    } else {
+      out[date] = { dots: [...out[date].dots, ...mark.dots] };
+    }
+  }
+  return out;
 }
 
 /** Items that touch a single calendar day. Multi-day busy_blocks match

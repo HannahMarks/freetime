@@ -21,6 +21,25 @@ jest.mock('../lib/availability-actions', () => ({
   deleteUnavailableDay: jest.fn(),
 }));
 
+// The calendar tab now imports event-actions + friend-actions for its
+// EventSheet + dot-rendering paths. Mock both so this focused suite
+// doesn't pull in the real Supabase client.
+jest.mock('../lib/event-actions', () => ({
+  listEvents: jest.fn().mockResolvedValue({ data: [], error: null }),
+  createEvent: jest.fn().mockResolvedValue({ id: null, error: null }),
+  updateEvent: jest.fn().mockResolvedValue({ error: null }),
+  deleteEvent: jest.fn().mockResolvedValue({ error: null }),
+  inviteFriends: jest.fn().mockResolvedValue({ error: null }),
+  respondToInvite: jest.fn().mockResolvedValue({ error: null }),
+}));
+
+jest.mock('../lib/friend-actions', () => ({
+  listFriendships: jest.fn().mockResolvedValue({
+    data: { incoming: [], outgoing: [], friends: [] },
+    error: null,
+  }),
+}));
+
 jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
 }));
