@@ -29,6 +29,14 @@ export type BusyBlockItem = {
    * production builders (`listCalendarItems`) always set it
    * explicitly to `null` for one-off blocks. */
   recurrenceRule?: RecurrenceRule | null;
+  /** When an occurrence has a `move` exception applied, this is the
+   * timestamp the series's `expandOccurrences` would have emitted for
+   * this slot if the exception didn't exist — i.e. the `original_start`
+   * column on `busy_block_exceptions`. `startsAt` carries the MOVED
+   * time the UI displays; subsequent edits (re-drag, skip this one,
+   * etc.) keyed by occurrence need this to find the exception row.
+   * Absent on un-moved occurrences and on one-off blocks. */
+  originalStart?: Date;
 };
 
 export type UnavailableDayItem = {

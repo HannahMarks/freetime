@@ -467,6 +467,65 @@ describe('listCalendarItems', () => {
       // All 3 occurrences shown — no exception applied.
       expect(dates).toEqual([11, 18, 25]);
     });
+
+    it('applies a "move" exception — moved occurrence appears at the new time, carries originalStart', async () => {
+      // Series: Mon May 11 2026 14:00 weekly. Move May 18 to May 18 at
+      // 16:00 (a 2-hour shift). Window covers May 11 → May 25.
+      mockSupabase.from
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                id: 'series1',
+                user_id: alice.id,
+                title: 'Yoga',
+                starts_at: '2026-05-11T21:00:00.000Z', // 14:00 PDT
+                ends_at: '2026-05-11T22:00:00.000Z',
+                notes: null,
+                location: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                series_id: 'series1',
+                original_start: '2026-05-18T21:00:00.000Z',
+                action: 'move',
+                new_start: '2026-05-18T23:00:00.000Z', // 16:00 PDT
+                new_end: '2026-05-19T00:30:00.000Z',
+              },
+            ],
+            error: null,
+          }),
+        );
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-05-25',
+      });
+
+      expect(error).toBeNull();
+      const busy = (data ?? []).filter((i) => i.kind === 'busy_block');
+      expect(busy).toHaveLength(2);
+      // First occurrence: May 11 at original time, no originalStart.
+      if (busy[0].kind !== 'busy_block') throw new Error();
+      expect(busy[0].startsAt.toISOString()).toBe('2026-05-11T21:00:00.000Z');
+      expect(busy[0].originalStart).toBeUndefined();
+      // Moved occurrence: displayed at the NEW time, originalStart
+      // carries the pre-move start so the UI can find the exception
+      // row for further edits.
+      if (busy[1].kind !== 'busy_block') throw new Error();
+      expect(busy[1].startsAt.toISOString()).toBe('2026-05-18T23:00:00.000Z');
+      expect(busy[1].endsAt.toISOString()).toBe('2026-05-19T00:30:00.000Z');
+      expect(busy[1].originalStart?.toISOString()).toBe('2026-05-18T21:00:00.000Z');
+    });
   });
 
   describe('recurring unavailable_days', () => {

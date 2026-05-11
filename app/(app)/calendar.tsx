@@ -23,7 +23,7 @@ import {
 import { SwipeableDayCarousel } from '../../components/SwipeableDayCarousel';
 import { SwipeableWeekStrip } from '../../components/SwipeableWeekStrip';
 import { useAuth } from '../../lib/auth';
-import { updateBusyBlock } from '../../lib/availability-actions';
+import { moveBusyBlockOccurrence, updateBusyBlock } from '../../lib/availability-actions';
 import { listCalendarItems } from '../../lib/calendar-actions';
 import {
   BusyBlockItem,
@@ -137,14 +137,28 @@ export default function CalendarScreen() {
     newEnd: Date,
   ) {
     if (item.user.id !== session?.user.id) return;
-    const { error } = await updateBusyBlock({
-      id: item.id,
-      startsAt: newStart,
-      endsAt: newEnd,
-      title: item.title,
-      notes: item.notes,
-      location: item.location,
-    });
+    // Routing decision: for recurring items, the drag writes a `move`
+    // exception for THIS occurrence only (so other Mondays in the
+    // series stay at 14:00); for one-offs, the drag mutates the row
+    // itself via updateBusyBlock. The `originalStart` field is the
+    // unmoved timestamp — present on already-moved occurrences so a
+    // second drag updates the same exception row rather than orphaning
+    // it under a new key.
+    const { error } = item.recurrenceRule
+      ? await moveBusyBlockOccurrence({
+          seriesId: item.id,
+          originalStart: item.originalStart ?? item.startsAt,
+          newStart,
+          newEnd,
+        })
+      : await updateBusyBlock({
+          id: item.id,
+          startsAt: newStart,
+          endsAt: newEnd,
+          title: item.title,
+          notes: item.notes,
+          location: item.location,
+        });
     if (error) {
       toast.error(error);
       return;

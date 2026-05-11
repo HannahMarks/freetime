@@ -98,7 +98,17 @@ export function expandOccurrences(args: {
    * Each key is an exact ISO timestamp; the helper compares against
    * `occurrence.startsAt.toISOString()`. */
   skipKeys?: Set<string>;
-}): Array<{ startsAt: Date; endsAt: Date }> {
+  /** Optional map of per-occurrence MOVES, keyed by the same ISO
+   * `original_start` string as `skipKeys`. When matched, the
+   * occurrence's `startsAt` / `endsAt` are replaced with the move's
+   * `newStart` / `newEnd`, and the original (pre-move) start is
+   * carried through on the result's `originalStart` field. The moved
+   * occurrence's IN-RANGE-ness is judged against the NEW times: a
+   * move can pull an occurrence into the window, or push it out.
+   * If a key appears in BOTH `skipKeys` AND `movesByKey`, skip wins
+   * (more conservative — produces no result for that key). */
+  movesByKey?: Map<string, { newStart: Date; newEnd: Date }>;
+}): Array<{ startsAt: Date; endsAt: Date; originalStart?: Date }> {
   if (args.rule.freq !== 'weekly') return [];
 
   const durationMs = args.baseEnd.getTime() - args.baseStart.getTime();
@@ -142,7 +152,7 @@ export function expandOccurrences(args: {
   const ms = args.baseStart.getMilliseconds();
   const baseStartMs = args.baseStart.getTime();
 
-  const out: Array<{ startsAt: Date; endsAt: Date }> = [];
+  const out: Array<{ startsAt: Date; endsAt: Date; originalStart?: Date }> = [];
   // Loop over weeks until we exhaust the range or hit the safety cap.
   // Cap on `n` is generous (MAX_OCCURRENCES * 2) so weeks with no
   // in-range occurrences (e.g. weekdays before the base in week 0)
@@ -161,23 +171,53 @@ export function expandOccurrences(args: {
       // series start" — skip. (The base itself is included when its
       // weekday is in `byDay`.)
       if (startMs < baseStartMs) continue;
-      // Cut off at `until` (inclusive end-of-day).
+      // Cut off at `until` (inclusive end-of-day). Applied to the
+      // ORIGINAL occurrence start — moving an occurrence doesn't let
+      // a moved date escape the series's natural end-date cap.
       if (startMs > untilMs) continue;
-      // Cut off at range end (exclusive). Track whether ANY occurrence
-      // in this week was before rangeEnd — used as the loop-termination
-      // signal (once an entire week is past rangeEnd, future weeks
-      // will be too).
+      // Termination signal: track whether the ORIGINAL (unmoved) week
+      // had anything before rangeEnd. We don't track moves' new times
+      // here — even if a move could pull an out-of-range occurrence
+      // back in, the original-start cutoff is the loop's terminator,
+      // and we accept that very-far-in-the-past moves into the window
+      // won't be emitted (the caller would need to know that and
+      // expand a wider range). For typical UI windows this never
+      // matters.
       if (startMs < rangeEndMs) weekHasFutureOccurrence = true;
-      if (startMs >= rangeEndMs) continue;
-      const endMs = startMs + durationMs;
-      // Skip occurrences whose interval ends at-or-before rangeStart
-      // (they're before the requested window).
-      if (endMs <= rangeStartMs) continue;
+      const originalIso = start.toISOString();
       // Per-occurrence skip exception lookup. Compares against
       // `start.toISOString()` so callers (listCalendarItems) can
       // build the set from `busy_block_exceptions.original_start`
       // raw timestamps without parsing them into Date instances.
-      if (args.skipKeys && args.skipKeys.has(start.toISOString())) continue;
+      // Skip wins over move (defensive in case the DB has both).
+      if (args.skipKeys && args.skipKeys.has(originalIso)) continue;
+
+      // Per-occurrence MOVE exception lookup. When found, the
+      // occurrence's visible times come from the move's new_start /
+      // new_end; original-start is carried through so callers can find
+      // the right exception row for further edits.
+      const move = args.movesByKey?.get(originalIso);
+      if (move) {
+        const moveStartMs = move.newStart.getTime();
+        const moveEndMs = move.newEnd.getTime();
+        // In-range check uses the MOVED times. An out-of-range moved
+        // occurrence (pushed past the window, or pulled before it
+        // entirely) is correctly dropped here.
+        if (moveStartMs >= rangeEndMs) continue;
+        if (moveEndMs <= rangeStartMs) continue;
+        out.push({
+          startsAt: new Date(moveStartMs),
+          endsAt: new Date(moveEndMs),
+          originalStart: new Date(startMs),
+        });
+        if (out.length >= MAX_OCCURRENCES) return out;
+        continue;
+      }
+
+      // Unmoved occurrence path. Same in-range checks as before.
+      if (startMs >= rangeEndMs) continue;
+      const endMs = startMs + durationMs;
+      if (endMs <= rangeStartMs) continue;
       out.push({ startsAt: start, endsAt: new Date(endMs) });
       if (out.length >= MAX_OCCURRENCES) return out;
     }
@@ -197,6 +237,13 @@ export function expandOccurrences(args: {
       // else: continue — week 0 with all-before-base weekdays falls
       // here on the very first iteration.
     }
+  }
+  // Moves can push an occurrence out of its natural chronological
+  // slot (e.g. move May 11 forward to May 25, past May 18). Final
+  // sort keeps callers from having to re-sort when rendering — a
+  // no-op when no moves are present.
+  if (args.movesByKey && args.movesByKey.size > 0) {
+    out.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   }
   return out;
 }

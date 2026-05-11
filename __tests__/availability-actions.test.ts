@@ -3,6 +3,7 @@ import {
   createUnavailableDay,
   deleteBusyBlock,
   deleteUnavailableDay,
+  moveBusyBlockOccurrence,
   skipBusyBlockOccurrence,
   updateBusyBlock,
   updateUnavailableDay,
@@ -372,6 +373,47 @@ describe('availability-actions', () => {
       expect(builder.delete).toHaveBeenCalled();
       expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'me-id');
       expect(builder.eq).toHaveBeenNthCalledWith(2, 'date', '2026-05-13');
+    });
+  });
+
+  describe('moveBusyBlockOccurrence', () => {
+    it('upserts a move exception with original_start + new_start + new_end as ISO + action=move', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const originalStart = new Date(2026, 4, 18, 14, 0);
+      const newStart = new Date(2026, 4, 18, 16, 0);
+      const newEnd = new Date(2026, 4, 18, 17, 30);
+      const { error } = await moveBusyBlockOccurrence({
+        seriesId: 'series1',
+        originalStart,
+        newStart,
+        newEnd,
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('busy_block_exceptions');
+      expect(builder.upsert).toHaveBeenCalledWith(
+        {
+          series_id: 'series1',
+          original_start: originalStart.toISOString(),
+          action: 'move',
+          new_start: newStart.toISOString(),
+          new_end: newEnd.toISOString(),
+        },
+        { onConflict: 'series_id,original_start' },
+      );
+    });
+
+    it('returns a friendly error if the upsert fails', async () => {
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await moveBusyBlockOccurrence({
+        seriesId: 'series1',
+        originalStart: new Date(),
+        newStart: new Date(),
+        newEnd: new Date(),
+      });
+      expect(error).toMatch(/couldn't move/i);
     });
   });
 

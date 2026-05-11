@@ -118,11 +118,15 @@ export async function listCalendarItems(args: {
     (busyResult.data ?? []) as unknown as BusyBlockRow[]
   ).filter((r) => isRecurrenceRule(r.recurrence_rule));
   const skipKeysBySeriesId = new Map<string, Set<string>>();
+  const movesBySeriesId = new Map<
+    string,
+    Map<string, { newStart: Date; newEnd: Date }>
+  >();
   if (recurringBusyRows.length > 0) {
     const seriesIds = recurringBusyRows.map((r) => r.id);
     const exceptionsResult = await supabase
       .from('busy_block_exceptions')
-      .select('series_id, original_start, action')
+      .select('series_id, original_start, action, new_start, new_end')
       .in('series_id', seriesIds);
     if (exceptionsResult.error) {
       // eslint-disable-next-line no-console
@@ -134,17 +138,34 @@ export async function listCalendarItems(args: {
         series_id: string;
         original_start: string;
         action: string;
+        new_start: string | null;
+        new_end: string | null;
       }>) {
-        if (ex.action !== 'skip') continue; // 'move' deferred to v4 follow-up
         // Normalise to the ISO format expandOccurrences emits, so the
         // string comparison inside the helper is exact regardless of
         // however Postgres formatted the timestamp on the wire.
         const key = new Date(ex.original_start).toISOString();
-        const existing = skipKeysBySeriesId.get(ex.series_id);
-        if (existing) {
-          existing.add(key);
-        } else {
-          skipKeysBySeriesId.set(ex.series_id, new Set([key]));
+        if (ex.action === 'skip') {
+          const existing = skipKeysBySeriesId.get(ex.series_id);
+          if (existing) {
+            existing.add(key);
+          } else {
+            skipKeysBySeriesId.set(ex.series_id, new Set([key]));
+          }
+        } else if (ex.action === 'move' && ex.new_start && ex.new_end) {
+          // Defensive: the schema's CHECK guarantees new_start +
+          // new_end are non-null on a move row, but tolerate a
+          // malformed row by skipping it rather than crashing.
+          const move = {
+            newStart: new Date(ex.new_start),
+            newEnd: new Date(ex.new_end),
+          };
+          const existing = movesBySeriesId.get(ex.series_id);
+          if (existing) {
+            existing.set(key, move);
+          } else {
+            movesBySeriesId.set(ex.series_id, new Map([[key, move]]));
+          }
         }
       }
     }
@@ -158,7 +179,10 @@ export async function listCalendarItems(args: {
     if (isRecurrenceRule(row.recurrence_rule)) {
       // Expand the series. Each occurrence is a separate CalendarItem
       // sharing the row's id + metadata; only startsAt/endsAt vary.
-      // Per-occurrence skip exceptions are applied via skipKeys.
+      // Per-occurrence skip exceptions are applied via skipKeys;
+      // 'move' exceptions are applied via movesByKey, and the
+      // resulting occurrence carries its pre-move start on
+      // `originalStart` for subsequent edit lookups.
       const occurrences = expandOccurrences({
         rule: row.recurrence_rule,
         baseStart,
@@ -166,6 +190,7 @@ export async function listCalendarItems(args: {
         rangeStart,
         rangeEnd,
         skipKeys: skipKeysBySeriesId.get(row.id),
+        movesByKey: movesBySeriesId.get(row.id),
       });
       for (const occ of occurrences) {
         items.push({
@@ -178,6 +203,7 @@ export async function listCalendarItems(args: {
           notes: row.notes,
           location: row.location,
           recurrenceRule: row.recurrence_rule,
+          originalStart: occ.originalStart,
         });
       }
     } else {
