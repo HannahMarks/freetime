@@ -183,6 +183,7 @@ describe('AddItemSheet', () => {
         date: '2026-05-13',
         title: 'PTO',
         notes: 'Out of state',
+        recurrenceRule: null,
       }),
     );
   });
@@ -548,6 +549,7 @@ describe('AddItemSheet', () => {
             date: '2026-05-13',
             title: 'Sick day',
             notes: 'Quick weekend trip',
+            recurrenceRule: null,
           }),
         );
       });
@@ -743,10 +745,26 @@ describe('AddItemSheet', () => {
       expect(call.recurrenceRule ?? null).toBeNull();
     });
 
-    it('does not show the recurrence toggle in unavailable-day mode (recurring all-day markers are out of v1 scope)', () => {
+    it('shows the recurrence toggle in unavailable-day mode (v3 added recurring unavailable_days)', () => {
       render(<AddItemSheet {...baseProps} />);
       fireEvent.press(screen.getByTestId('kind-unavailable'));
-      expect(screen.queryByTestId('repeat-weekly-toggle')).toBeNull();
+      expect(screen.getByTestId('repeat-weekly-toggle')).toBeOnTheScreen();
+    });
+
+    it('saves a recurring unavailable_day with the rule', async () => {
+      mockedCreateUnavail.mockResolvedValue({ error: null });
+      render(<AddItemSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('kind-unavailable'));
+      fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'No-meetings');
+      // Toggle recurrence on (auto-seeds Wed since selectedDate is a Wed)
+      // and add Friday.
+      fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+      fireEvent.press(screen.getByTestId('byday-5'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreateUnavail).toHaveBeenCalled());
+      const call = mockedCreateUnavail.mock.calls[0][0];
+      expect(call.recurrenceRule).toEqual({ freq: 'weekly', byDay: [3, 5] });
     });
 
     it('view mode shows the recurrence line with the base weekday when byDay is omitted', () => {
@@ -943,6 +961,7 @@ describe('AddItemSheet', () => {
         date: '2026-05-13',
         title: 'Sick',
         notes: null,
+        recurrenceRule: null,
       }),
     );
     await waitFor(() => expect(onSaved).toHaveBeenCalled());

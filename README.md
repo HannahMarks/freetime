@@ -110,7 +110,7 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ Notes + location — `notes` + `location` columns on `busy_blocks`, `notes` on `unavailable_days`; multi-line Notes input + single-line Location input in the sheet ([#24](https://github.com/HannahMarks/freetime/pull/24))
 - ✅ Drag-to-reschedule — long-press a busy_block on the day timeline and pan to a new time; release commits via `updateBusyBlock`, snapping to 15-min increments and preserving duration ([#25](https://github.com/HannahMarks/freetime/pull/25))
 - 🚧 Swipe-to-dismiss month grid — drag the month grid upward past a threshold to hide it; chevron still toggles it back (#26)
-- 🚧 Recurring busy_blocks (v1 + v2) — `recurrence_rule` JSONB on `busy_blocks` with `expandOccurrences()` walking each series at +7d intervals (DST-safe via `setDate`); `listCalendarItems` returns one CalendarItem per occurrence in the requested window. v2 adds a day-of-week multi-picker (`byDay`) + optional end-date (`until`); the AddItemSheet has 7 chips (Su/Mo/Tu/We/Th/Fr/Sa) and an "Ends on a date" toggle that opens a DatePicker. View mode summarises as "Weekly on Mon, Wed, Fri until Dec 31, 2026"
+- 🚧 Recurring availability (v1 + v2 + v3) — `recurrence_rule` JSONB on both `busy_blocks` and `unavailable_days`, with `expandOccurrences()` walking each series at +7d intervals (DST-safe via `setDate`); `listCalendarItems` returns one CalendarItem per occurrence in the requested window. Rule shape: `{freq:'weekly', byDay?: number[], until?: 'YYYY-MM-DD'}`. AddItemSheet (busy + unavailable modes) has a "Repeat weekly" toggle, 7 day-of-week chips that auto-seed the base's weekday, and an "Ends on a date" sub-toggle. View mode summarises as "Weekly on Mon, Wed, Fri until Dec 31, 2026"
 
 ### Phase 2 — events + invites
 

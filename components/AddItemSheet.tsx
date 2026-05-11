@@ -371,10 +371,15 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
       setEnd(initialEnd);
       setFormMode(!editing);
       setMenuOpen(false);
-      // Pre-fill recurrence from the editing item. For an unavailable_day
-      // the toggle is always considered off (no recurrence support yet).
+      // Pre-fill recurrence from the editing item — both kinds carry
+      // recurrenceRule now (busy_blocks since v1, unavailable_days
+      // since v3).
       const editingRule =
-        editing?.kind === 'busy_block' ? editing.recurrenceRule : null;
+        editing?.kind === 'busy_block'
+          ? editing.recurrenceRule
+          : editing?.kind === 'unavailable_day'
+            ? editing.recurrenceRule
+            : null;
       setRepeatWeekly(editingRule != null);
       setByDay(editingRule?.byDay ?? []);
       setUntil(editingRule?.until ?? null);
@@ -426,18 +431,32 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           return;
         }
       } else {
+        // Same recurrence projection as the busy branch — empty byDay
+        // → omitted, null until → omitted, repeatWeekly off → null
+        // (one-off).
+        let recurrenceRule: RecurrenceRule | null = null;
+        if (repeatWeekly) {
+          recurrenceRule = { freq: 'weekly' };
+          if (byDay.length > 0) recurrenceRule.byDay = [...byDay].sort((a, b) => a - b);
+          if (until) recurrenceRule.until = until;
+        }
         const { error } =
           editing?.kind === 'unavailable_day'
             ? await updateUnavailableDay({
                 userId: editing.user.id,
-                date: editing.date,
+                // For an expanded occurrence, `editing.date` is the
+                // OCCURRENCE date — fall back to the seriesDate so the
+                // (user_id, date) PK lookup hits the underlying row.
+                date: editing.seriesDate ?? editing.date,
                 title: trimmedTitle,
                 notes: trimmedNotes,
+                recurrenceRule,
               })
             : await createUnavailableDay({
                 date: selectedDate,
                 title: trimmedTitle,
                 notes: trimmedNotes,
+                recurrenceRule,
               });
         if (error) {
           toast.error(error);
@@ -635,15 +654,22 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 <Text style={styles.viewValue} testID="view-date">{viewDate}</Text>
                 <Text style={styles.viewValue} testID="view-time">{viewTimeRange}</Text>
               </View>
-              {editing && editing.kind === 'busy_block' && editing.recurrenceRule ? (
+              {editing?.recurrenceRule ? (
                 // Compose the recurrence summary from the rule's byDay
-                // and until fields. Empty/missing byDay → just "weekly"
-                // (the helper falls back to the base's weekday). Missing
-                // until → no end-date suffix.
+                // and until fields. Empty/missing byDay → falls back to
+                // the base's weekday. Missing until → no end-date
+                // suffix. Works for both busy_blocks (uses startsAt as
+                // the "base date" reference) and unavailable_days
+                // (parses the YYYY-MM-DD `date` field for the same).
                 <View style={styles.viewRow}>
                   <Text style={styles.viewLabel}>Repeats</Text>
                   <Text style={styles.viewValue} testID="view-recurrence">
-                    {summarizeRecurrence(editing.recurrenceRule, editing.startsAt)}
+                    {summarizeRecurrence(
+                      editing.recurrenceRule,
+                      editing.kind === 'busy_block'
+                        ? editing.startsAt
+                        : parseIsoDate(editing.seriesDate ?? editing.date),
+                    )}
                   </Text>
                 </View>
               ) : null}
@@ -748,145 +774,139 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                       onChangeText={setLocation}
                     />
                   </View>
+                </>
+              ) : null}
 
-                  {/* Repeat-weekly toggle. Hand-rolled mini-switch (not
-                      RN's Switch) so the off / on visuals stay
-                      monochrome and don't collide with the iOS green
-                      tint. Toggling on for the first time auto-seeds
-                      `byDay` with the start's weekday so the rule never
-                      saves with both an empty byDay AND no inferred
-                      default visible to the user. */}
+              {/* Recurrence section. Same UI for busy + unavailable
+                  modes — recurring all-day markers ("every Sunday I'm
+                  unavailable") use the same `recurrence_rule` shape +
+                  `expandOccurrences` helper as recurring busy blocks.
+                  Hand-rolled mini-switch (not RN's Switch) keeps the
+                  off / on visuals monochrome. Toggling Repeat on for
+                  the first time auto-seeds `byDay` with the start's
+                  weekday so the chip row isn't visually empty. */}
+              <Pressable
+                onPress={() => {
+                  setRepeatWeekly((v) => {
+                    const next = !v;
+                    if (next && byDay.length === 0) {
+                      setByDay([start.getDay()]);
+                    }
+                    return next;
+                  });
+                }}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: repeatWeekly }}
+                accessibilityLabel="Repeat weekly"
+                testID="repeat-weekly-toggle"
+                style={({ pressed }) => [
+                  styles.repeatRow,
+                  pressed && styles.repeatRowPressed,
+                ]}
+              >
+                <Text style={styles.repeatLabel}>Repeat weekly</Text>
+                <View
+                  style={[
+                    styles.repeatSwitch,
+                    repeatWeekly && styles.repeatSwitchOn,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.repeatSwitchKnob,
+                      repeatWeekly && styles.repeatSwitchKnobOn,
+                    ]}
+                  />
+                </View>
+              </Pressable>
+
+              {repeatWeekly ? (
+                <>
+                  {/* Day-of-week multi-picker. 7 chips, tap to toggle
+                      that weekday in/out of `byDay`. Empty selection
+                      saves as no `byDay` (helper falls back to the
+                      base block's weekday). */}
+                  <View style={styles.dayChipRow} testID="byday-chips">
+                    {WEEKDAY_LABELS.map((label, dayIdx) => {
+                      const selected = byDay.includes(dayIdx);
+                      return (
+                        <Pressable
+                          key={dayIdx}
+                          onPress={() => {
+                            setByDay((prev) =>
+                              prev.includes(dayIdx)
+                                ? prev.filter((d) => d !== dayIdx)
+                                : [...prev, dayIdx],
+                            );
+                          }}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: selected }}
+                          accessibilityLabel={`Repeat on ${WEEKDAY_FULL_NAMES[dayIdx]}`}
+                          testID={`byday-${dayIdx}`}
+                          style={[
+                            styles.dayChip,
+                            selected && styles.dayChipSelected,
+                          ]}
+                        >
+                          <Text
+                            style={
+                              selected
+                                ? styles.dayChipLabelSelected
+                                : styles.dayChipLabel
+                            }
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {/* Optional end-of-series date. */}
                   <Pressable
                     onPress={() => {
-                      setRepeatWeekly((v) => {
-                        const next = !v;
-                        if (next && byDay.length === 0) {
-                          setByDay([start.getDay()]);
-                        }
-                        return next;
-                      });
+                      if (until) {
+                        setUntil(null);
+                      } else {
+                        const def = new Date(start);
+                        def.setMonth(def.getMonth() + 1);
+                        setUntil(toIsoDate(def));
+                      }
                     }}
                     accessibilityRole="switch"
-                    accessibilityState={{ checked: repeatWeekly }}
-                    accessibilityLabel="Repeat weekly"
-                    testID="repeat-weekly-toggle"
+                    accessibilityState={{ checked: until != null }}
+                    accessibilityLabel="Set an end date"
+                    testID="until-toggle"
                     style={({ pressed }) => [
                       styles.repeatRow,
                       pressed && styles.repeatRowPressed,
                     ]}
                   >
-                    <Text style={styles.repeatLabel}>Repeat weekly</Text>
+                    <Text style={styles.repeatLabel}>Ends on a date</Text>
                     <View
                       style={[
                         styles.repeatSwitch,
-                        repeatWeekly && styles.repeatSwitchOn,
+                        until != null && styles.repeatSwitchOn,
                       ]}
                     >
                       <View
                         style={[
                           styles.repeatSwitchKnob,
-                          repeatWeekly && styles.repeatSwitchKnobOn,
+                          until != null && styles.repeatSwitchKnobOn,
                         ]}
                       />
                     </View>
                   </Pressable>
 
-                  {repeatWeekly ? (
-                    <>
-                      {/* Day-of-week multi-picker. 7 chips, tap to
-                          toggle that weekday in/out of `byDay`. Empty
-                          selection saves as no `byDay` (helper falls
-                          back to the base block's weekday). */}
-                      <View style={styles.dayChipRow} testID="byday-chips">
-                        {WEEKDAY_LABELS.map((label, dayIdx) => {
-                          const selected = byDay.includes(dayIdx);
-                          return (
-                            <Pressable
-                              key={dayIdx}
-                              onPress={() => {
-                                setByDay((prev) =>
-                                  prev.includes(dayIdx)
-                                    ? prev.filter((d) => d !== dayIdx)
-                                    : [...prev, dayIdx],
-                                );
-                              }}
-                              accessibilityRole="checkbox"
-                              accessibilityState={{ checked: selected }}
-                              accessibilityLabel={`Repeat on ${WEEKDAY_FULL_NAMES[dayIdx]}`}
-                              testID={`byday-${dayIdx}`}
-                              style={[
-                                styles.dayChip,
-                                selected && styles.dayChipSelected,
-                              ]}
-                            >
-                              <Text
-                                style={
-                                  selected
-                                    ? styles.dayChipLabelSelected
-                                    : styles.dayChipLabel
-                                }
-                              >
-                                {label}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-
-                      {/* Optional end-of-series date. Toggle-style row
-                          mirroring "Repeat weekly" — flipping it on
-                          opens a DatePicker pre-seeded one month after
-                          the start; flipping off clears the until
-                          string. The date picker stays mounted while
-                          the row is on so the user can adjust without
-                          re-toggling. */}
-                      <Pressable
-                        onPress={() => {
-                          if (until) {
-                            setUntil(null);
-                          } else {
-                            // Default: 1 month after the start.
-                            const def = new Date(start);
-                            def.setMonth(def.getMonth() + 1);
-                            setUntil(toIsoDate(def));
-                          }
-                        }}
-                        accessibilityRole="switch"
-                        accessibilityState={{ checked: until != null }}
-                        accessibilityLabel="Set an end date"
-                        testID="until-toggle"
-                        style={({ pressed }) => [
-                          styles.repeatRow,
-                          pressed && styles.repeatRowPressed,
-                        ]}
-                      >
-                        <Text style={styles.repeatLabel}>Ends on a date</Text>
-                        <View
-                          style={[
-                            styles.repeatSwitch,
-                            until != null && styles.repeatSwitchOn,
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.repeatSwitchKnob,
-                              until != null && styles.repeatSwitchKnobOn,
-                            ]}
-                          />
-                        </View>
-                      </Pressable>
-
-                      {until ? (
-                        <View style={styles.untilRow}>
-                          <Text style={styles.label}>Ends</Text>
-                          <DatePicker
-                            testID="until-picker"
-                            value={parseIsoDate(until)}
-                            onChange={(picked) => setUntil(toIsoDate(picked))}
-                          />
-                        </View>
-                      ) : null}
-                    </>
+                  {until ? (
+                    <View style={styles.untilRow}>
+                      <Text style={styles.label}>Ends</Text>
+                      <DatePicker
+                        testID="until-picker"
+                        value={parseIsoDate(until)}
+                        onChange={(picked) => setUntil(toIsoDate(picked))}
+                      />
+                    </View>
                   ) : null}
                 </>
               ) : null}
