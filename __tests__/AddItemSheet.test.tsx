@@ -19,6 +19,7 @@ jest.mock('../lib/availability-actions', () => ({
   updateUnavailableDay: jest.fn(),
   deleteBusyBlock: jest.fn(),
   deleteUnavailableDay: jest.fn(),
+  skipBusyBlockOccurrence: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -709,6 +710,73 @@ describe('AddItemSheet', () => {
         await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server is grumpy'));
         expect(onSaved).not.toHaveBeenCalled();
         expect(onClose).not.toHaveBeenCalled();
+
+        alertSpy.mockRestore();
+      });
+    });
+
+    describe('per-occurrence skip (recurring busy_blocks)', () => {
+      const recurringBusy: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 18, 14, 0),
+        endsAt: new Date(2026, 4, 18, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+
+      it('the popover shows BOTH "Delete this occurrence" and "Delete entire series" for a recurring busy_block', () => {
+        render(<AddItemSheet {...baseProps} editing={recurringBusy} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.getByTestId('event-menu-skip')).toBeOnTheScreen();
+        expect(screen.getByTestId('event-menu-delete')).toBeOnTheScreen();
+        // Delete-series item label flips for recurring items so the
+        // user understands which one's about to fire.
+        expect(screen.getByText('Delete entire series')).toBeOnTheScreen();
+        expect(screen.queryByText('Delete event')).toBeNull();
+      });
+
+      it('the popover shows ONLY "Delete event" (no skip) for a one-off busy_block', () => {
+        const oneOff: CalendarItem = { ...recurringBusy, recurrenceRule: null };
+        render(<AddItemSheet {...baseProps} editing={oneOff} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.queryByTestId('event-menu-skip')).toBeNull();
+        expect(screen.getByText('Delete event')).toBeOnTheScreen();
+      });
+
+      it('"Delete this occurrence" calls skipBusyBlockOccurrence with the series id + occurrence start', async () => {
+        const mockedSkip = jest.requireMock('../lib/availability-actions')
+          .skipBusyBlockOccurrence as jest.Mock;
+        mockedSkip.mockResolvedValue({ error: null });
+        const onSaved = jest.fn();
+        const onClose = jest.fn();
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+          destructive?.onPress?.();
+        });
+
+        render(
+          <AddItemSheet
+            {...baseProps}
+            editing={recurringBusy}
+            onSaved={onSaved}
+            onClose={onClose}
+          />,
+        );
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-skip'));
+
+        await waitFor(() =>
+          expect(mockedSkip).toHaveBeenCalledWith({
+            seriesId: 'series1',
+            originalStart: recurringBusy.kind === 'busy_block' ? recurringBusy.startsAt : new Date(),
+          }),
+        );
+        await waitFor(() => expect(onSaved).toHaveBeenCalled());
+        await waitFor(() => expect(onClose).toHaveBeenCalled());
 
         alertSpy.mockRestore();
       });

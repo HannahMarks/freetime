@@ -3,6 +3,7 @@ import {
   createUnavailableDay,
   deleteBusyBlock,
   deleteUnavailableDay,
+  skipBusyBlockOccurrence,
   updateBusyBlock,
   updateUnavailableDay,
 } from '../lib/availability-actions';
@@ -23,7 +24,7 @@ const mockSupabase = supabase as unknown as {
 function chainable(resolved: unknown) {
   const builder: Record<string, jest.Mock> = {};
   const terminal = Promise.resolve(resolved);
-  for (const name of ['select', 'insert', 'update', 'delete', 'eq']) {
+  for (const name of ['select', 'insert', 'update', 'upsert', 'delete', 'eq']) {
     builder[name] = jest.fn().mockReturnValue(builder);
   }
   (builder as { then: unknown }).then = (onFulfilled: unknown, onRejected: unknown) =>
@@ -371,6 +372,41 @@ describe('availability-actions', () => {
       expect(builder.delete).toHaveBeenCalled();
       expect(builder.eq).toHaveBeenNthCalledWith(1, 'user_id', 'me-id');
       expect(builder.eq).toHaveBeenNthCalledWith(2, 'date', '2026-05-13');
+    });
+  });
+
+  describe('skipBusyBlockOccurrence', () => {
+    it('upserts a skip exception with the original_start as ISO + null new_*', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const originalStart = new Date(2026, 4, 18, 14, 0);
+      const { error } = await skipBusyBlockOccurrence({
+        seriesId: 'series1',
+        originalStart,
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('busy_block_exceptions');
+      expect(builder.upsert).toHaveBeenCalledWith(
+        {
+          series_id: 'series1',
+          original_start: originalStart.toISOString(),
+          action: 'skip',
+          new_start: null,
+          new_end: null,
+        },
+        { onConflict: 'series_id,original_start' },
+      );
+    });
+
+    it('returns a friendly error if the upsert fails', async () => {
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await skipBusyBlockOccurrence({
+        seriesId: 'series1',
+        originalStart: new Date(),
+      });
+      expect(error).toMatch(/couldn't skip/i);
     });
   });
 });

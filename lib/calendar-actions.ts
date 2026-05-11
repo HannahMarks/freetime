@@ -107,6 +107,49 @@ export async function listCalendarItems(args: {
   const rangeStart = new Date(fy, fm - 1, fd);
   const rangeEnd = new Date(ty, tm - 1, td);
 
+  // Per-occurrence skip exceptions, indexed by series id. Only fetched
+  // when there's at least one recurring busy_block in the result —
+  // skips a round-trip in the common all-one-offs case. The exceptions
+  // query is treated as best-effort: if it fails (e.g. the table
+  // doesn't exist on a fresh DB), we log and proceed with no skips
+  // applied, since showing every occurrence (with the deleted one
+  // mistakenly visible) is preferable to failing the whole calendar.
+  const recurringBusyRows = (
+    (busyResult.data ?? []) as unknown as BusyBlockRow[]
+  ).filter((r) => isRecurrenceRule(r.recurrence_rule));
+  const skipKeysBySeriesId = new Map<string, Set<string>>();
+  if (recurringBusyRows.length > 0) {
+    const seriesIds = recurringBusyRows.map((r) => r.id);
+    const exceptionsResult = await supabase
+      .from('busy_block_exceptions')
+      .select('series_id, original_start, action')
+      .in('series_id', seriesIds);
+    if (exceptionsResult.error) {
+      // eslint-disable-next-line no-console
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[calendar] exceptions load failed', exceptionsResult.error);
+      }
+    } else {
+      for (const ex of (exceptionsResult.data ?? []) as Array<{
+        series_id: string;
+        original_start: string;
+        action: string;
+      }>) {
+        if (ex.action !== 'skip') continue; // 'move' deferred to v4 follow-up
+        // Normalise to the ISO format expandOccurrences emits, so the
+        // string comparison inside the helper is exact regardless of
+        // however Postgres formatted the timestamp on the wire.
+        const key = new Date(ex.original_start).toISOString();
+        const existing = skipKeysBySeriesId.get(ex.series_id);
+        if (existing) {
+          existing.add(key);
+        } else {
+          skipKeysBySeriesId.set(ex.series_id, new Set([key]));
+        }
+      }
+    }
+  }
+
   for (const row of (busyResult.data ?? []) as unknown as BusyBlockRow[]) {
     if (!row.user) continue; // defensive — embedded join failed
     const baseStart = new Date(row.starts_at);
@@ -115,12 +158,14 @@ export async function listCalendarItems(args: {
     if (isRecurrenceRule(row.recurrence_rule)) {
       // Expand the series. Each occurrence is a separate CalendarItem
       // sharing the row's id + metadata; only startsAt/endsAt vary.
+      // Per-occurrence skip exceptions are applied via skipKeys.
       const occurrences = expandOccurrences({
         rule: row.recurrence_rule,
         baseStart,
         baseEnd,
         rangeStart,
         rangeEnd,
+        skipKeys: skipKeysBySeriesId.get(row.id),
       });
       for (const occ of occurrences) {
         items.push({
