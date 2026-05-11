@@ -123,7 +123,7 @@ describe('expandOccurrences (weekly)', () => {
   it('returns an empty array for an unsupported frequency without throwing', () => {
     const out = expandOccurrences({
       // @ts-expect-error testing unsupported freq survives gracefully
-      rule: { freq: 'monthly' },
+      rule: { freq: 'biweekly' },
       baseStart,
       baseEnd,
       rangeStart: new Date(2026, 4, 11, 0, 0),
@@ -474,5 +474,194 @@ describe('isRecurrenceRule (extended shapes)', () => {
     expect(
       isRecurrenceRule({ freq: 'weekly', byDay: [1, 3, 5], until: '2026-12-31' }),
     ).toBe(true);
+  });
+
+  it('accepts { freq: "monthly" }', () => {
+    expect(isRecurrenceRule({ freq: 'monthly' })).toBe(true);
+  });
+
+  it('accepts { freq: "yearly" }', () => {
+    expect(isRecurrenceRule({ freq: 'yearly' })).toBe(true);
+  });
+
+  it('accepts monthly with an until clause', () => {
+    expect(
+      isRecurrenceRule({ freq: 'monthly', until: '2027-05-11' }),
+    ).toBe(true);
+  });
+});
+
+describe('expandOccurrences (monthly)', () => {
+  // Friday 2026-05-15 18:00 → 20:00.
+  const baseStart = new Date(2026, 4, 15, 18, 0);
+  const baseEnd = new Date(2026, 4, 15, 20, 0);
+  const rule: RecurrenceRule = { freq: 'monthly' };
+
+  it('returns the base occurrence within a single month range', () => {
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 1),
+      rangeEnd: new Date(2026, 5, 1),
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].startsAt).toEqual(baseStart);
+    expect(out[0].endsAt).toEqual(baseEnd);
+  });
+
+  it('walks +1 month preserving day-of-month and wall-clock time', () => {
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 1),
+      // Through end of July (3 occurrences: May 15, Jun 15, Jul 15)
+      rangeEnd: new Date(2026, 7, 1),
+    });
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([15, 15, 15]);
+    expect(out.map((o) => o.startsAt.getMonth())).toEqual([4, 5, 6]);
+    // Hour/minute preserved on every occurrence.
+    for (const o of out) {
+      expect(o.startsAt.getHours()).toBe(18);
+      expect(o.endsAt.getHours()).toBe(20);
+    }
+  });
+
+  it('clamps the day when the next month is shorter (Jan 31 → Feb 28)', () => {
+    // Jan 31 2026 — the next month (Feb 2026, non-leap) only has 28 days.
+    const out = expandOccurrences({
+      rule,
+      baseStart: new Date(2026, 0, 31, 9, 0),
+      baseEnd: new Date(2026, 0, 31, 10, 0),
+      rangeStart: new Date(2026, 0, 1),
+      rangeEnd: new Date(2026, 3, 1), // through end of March
+    });
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => `${o.startsAt.getMonth()}-${o.startsAt.getDate()}`)).toEqual([
+      '0-31', // Jan 31
+      '1-28', // Feb 28 (clamped from 31)
+      '2-31', // Mar 31 (back to the natural day)
+    ]);
+  });
+
+  it('handles Feb 29 → Feb 28 in non-leap years', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'monthly' },
+      baseStart: new Date(2024, 1, 29, 9, 0), // 2024 IS a leap year
+      baseEnd: new Date(2024, 1, 29, 10, 0),
+      rangeStart: new Date(2024, 1, 1),
+      rangeEnd: new Date(2024, 3, 1), // through March
+    });
+    // Feb 29, Mar 29 (Mar has 29 — natural). No clamping needed in
+    // this range; this is the smoke test for the simpler case.
+    expect(out).toHaveLength(2);
+    expect(out[0].startsAt.getDate()).toBe(29);
+    expect(out[1].startsAt.getDate()).toBe(29);
+  });
+
+  it('respects the until cap', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'monthly', until: '2026-06-15' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 1),
+      rangeEnd: new Date(2026, 11, 1),
+    });
+    // May 15 + Jun 15. Jul 15 would be after the inclusive cap.
+    expect(out).toHaveLength(2);
+    expect(out.map((o) => o.startsAt.getMonth())).toEqual([4, 5]);
+  });
+
+  it('ignores byDay (weekly-only field) on monthly rules', () => {
+    const out = expandOccurrences({
+      // byDay would normally select different weekdays — for monthly
+      // the helper ignores it and emits one occurrence per month at
+      // the base's day-of-month.
+      rule: { freq: 'monthly', byDay: [1, 3, 5] },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 1),
+      rangeEnd: new Date(2026, 7, 1),
+    });
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([15, 15, 15]);
+  });
+});
+
+describe('expandOccurrences (yearly)', () => {
+  // Birthday: 2026-05-15 (the user asked for yearly events).
+  const baseStart = new Date(2026, 4, 15, 9, 0);
+  const baseEnd = new Date(2026, 4, 15, 10, 0);
+  const rule: RecurrenceRule = { freq: 'yearly' };
+
+  it('returns the base occurrence within a one-year range', () => {
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 0, 1),
+      rangeEnd: new Date(2027, 0, 1),
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].startsAt).toEqual(baseStart);
+  });
+
+  it('walks +1 year preserving month + day-of-month + wall-clock', () => {
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 0, 1),
+      rangeEnd: new Date(2029, 0, 1),
+    });
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => o.startsAt.getFullYear())).toEqual([2026, 2027, 2028]);
+    for (const o of out) {
+      expect(o.startsAt.getMonth()).toBe(4);
+      expect(o.startsAt.getDate()).toBe(15);
+      expect(o.startsAt.getHours()).toBe(9);
+    }
+  });
+
+  it('clamps Feb 29 to Feb 28 in non-leap years', () => {
+    const out = expandOccurrences({
+      rule,
+      baseStart: new Date(2024, 1, 29, 9, 0),
+      baseEnd: new Date(2024, 1, 29, 10, 0),
+      rangeStart: new Date(2024, 0, 1),
+      rangeEnd: new Date(2027, 0, 1),
+    });
+    // 2024 Feb 29, 2025 Feb 28 (clamped), 2026 Feb 28 (clamped).
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => `${o.startsAt.getFullYear()}-${o.startsAt.getMonth()}-${o.startsAt.getDate()}`)).toEqual([
+      '2024-1-29',
+      '2025-1-28',
+      '2026-1-28',
+    ]);
+  });
+
+  it('respects the until cap (inclusive end-of-day)', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'yearly', until: '2027-05-15' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 0, 1),
+      rangeEnd: new Date(2030, 0, 1),
+    });
+    expect(out).toHaveLength(2);
+    expect(out.map((o) => o.startsAt.getFullYear())).toEqual([2026, 2027]);
+  });
+
+  it('returns an empty list when until is before the base', () => {
+    const out = expandOccurrences({
+      rule: { freq: 'yearly', until: '2024-01-01' },
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2020, 0, 1),
+      rangeEnd: new Date(2030, 0, 1),
+    });
+    expect(out).toEqual([]);
   });
 });

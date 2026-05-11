@@ -592,4 +592,114 @@ describe('EventSheet', () => {
       expect(screen.queryByTestId('view-attendees')).toBeNull();
     });
   });
+
+  describe('recurrence — monthly + yearly (events)', () => {
+    it('hides the recurrence section by default and shows it on toggle', () => {
+      render(<EventSheet {...baseProps} />);
+      const toggle = screen.getByTestId('event-repeat-toggle');
+      expect(toggle).toBeOnTheScreen();
+      // Frequency picker is hidden when the Repeat toggle is off — the
+      // section collapses to just the toggle row.
+      expect(screen.queryByTestId('event-freq-weekly')).toBeNull();
+      fireEvent.press(toggle);
+      expect(screen.getByTestId('event-freq-weekly')).toBeOnTheScreen();
+      expect(screen.getByTestId('event-freq-monthly')).toBeOnTheScreen();
+      expect(screen.getByTestId('event-freq-yearly')).toBeOnTheScreen();
+    });
+
+    it('defaults to weekly when the Repeat toggle is first turned on', async () => {
+      mockedCreate.mockResolvedValue({ id: 'ev-rec', error: null });
+      render(<EventSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('event-repeat-toggle'));
+      fireEvent.press(screen.getByLabelText('Save'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      const call = mockedCreate.mock.calls[0][0];
+      expect(call.recurrenceRule).toEqual({ freq: 'weekly' });
+    });
+
+    it('saves a monthly recurrenceRule when the Monthly chip is tapped', async () => {
+      mockedCreate.mockResolvedValue({ id: 'ev-rec', error: null });
+      render(<EventSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('event-repeat-toggle'));
+      fireEvent.press(screen.getByTestId('event-freq-monthly'));
+      fireEvent.press(screen.getByLabelText('Save'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      const call = mockedCreate.mock.calls[0][0];
+      expect(call.recurrenceRule).toEqual({ freq: 'monthly' });
+    });
+
+    it('saves a yearly recurrenceRule when the Yearly chip is tapped', async () => {
+      mockedCreate.mockResolvedValue({ id: 'ev-rec', error: null });
+      render(<EventSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('event-repeat-toggle'));
+      fireEvent.press(screen.getByTestId('event-freq-yearly'));
+      fireEvent.press(screen.getByLabelText('Save'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      const call = mockedCreate.mock.calls[0][0];
+      expect(call.recurrenceRule).toEqual({ freq: 'yearly' });
+    });
+
+    it('saves null recurrenceRule when the Repeat toggle is off', async () => {
+      mockedCreate.mockResolvedValue({ id: 'ev-new', error: null });
+      render(<EventSheet {...baseProps} />);
+      fireEvent.press(screen.getByLabelText('Save'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      const call = mockedCreate.mock.calls[0][0];
+      expect(call.recurrenceRule).toBeNull();
+    });
+
+    it('persists an until clause when the Ends-on-a-date sub-toggle is on', async () => {
+      mockedCreate.mockResolvedValue({ id: 'ev-rec', error: null });
+      render(<EventSheet {...baseProps} />);
+      fireEvent.press(screen.getByTestId('event-repeat-toggle'));
+      fireEvent.press(screen.getByTestId('event-freq-monthly'));
+      fireEvent.press(screen.getByTestId('event-until-toggle'));
+      // The DatePicker is the only one with testID `event-until-picker`.
+      // It auto-seeds an until value when the toggle flips on — saving
+      // immediately should produce a non-null until.
+      fireEvent.press(screen.getByLabelText('Save'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      const call = mockedCreate.mock.calls[0][0];
+      expect(call.recurrenceRule?.freq).toBe('monthly');
+      expect(typeof call.recurrenceRule?.until).toBe('string');
+      expect(call.recurrenceRule?.until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('pre-fills the form with a monthly rule when editing a recurring event', () => {
+      const monthlyEvent: EventItem = {
+        ...existingEvent,
+        recurrenceRule: { freq: 'monthly' },
+      };
+      render(<EventSheet {...baseProps} editing={monthlyEvent} />);
+      // View mode summary row should mention "Monthly".
+      const summary = screen.getByTestId('view-recurrence').props.children as string;
+      expect(summary).toMatch(/^Monthly/);
+      // Entering edit mode → toggle is already on; freq chip "monthly"
+      // is selected.
+      fireEvent.press(screen.getByLabelText('Edit'));
+      const monthlyChip = screen.getByTestId('event-freq-monthly');
+      expect(monthlyChip.props.accessibilityState?.checked).toBe(true);
+    });
+
+    it('view-mode summary line is hidden for one-off events', () => {
+      render(<EventSheet {...baseProps} editing={existingEvent} />);
+      expect(screen.queryByTestId('view-recurrence')).toBeNull();
+    });
+
+    it('updates an existing event with a new recurrenceRule on save', async () => {
+      mockedUpdate.mockResolvedValue({ error: null });
+      const oneOff: EventItem = {
+        ...existingEvent,
+        recurrenceRule: null,
+      };
+      render(<EventSheet {...baseProps} editing={oneOff} />);
+      fireEvent.press(screen.getByLabelText('Edit'));
+      fireEvent.press(screen.getByTestId('event-repeat-toggle'));
+      fireEvent.press(screen.getByTestId('event-freq-yearly'));
+      fireEvent.press(screen.getByLabelText('Save'));
+      await waitFor(() => expect(mockedUpdate).toHaveBeenCalled());
+      const call = mockedUpdate.mock.calls[0][0];
+      expect(call.recurrenceRule).toEqual({ freq: 'yearly' });
+    });
+  });
 });

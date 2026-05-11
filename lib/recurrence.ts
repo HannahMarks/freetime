@@ -1,32 +1,45 @@
-// Recurrence rules for busy_blocks. Stored as JSONB on the
-// `busy_blocks.recurrence_rule` column; null means the block is a
-// one-off.
+// Recurrence rules for busy_blocks, unavailable_days, and events.
+// Stored as JSONB on the `recurrence_rule` column of each table; null
+// means the row is a one-off.
 //
-// Supported shape (v2):
+// Supported shape (v3):
 // ```ts
 // {
-//   freq: 'weekly';
-//   byDay?: number[];   // 0=Sun, 1=Mon, ..., 6=Sat
+//   freq: 'weekly' | 'monthly' | 'yearly';
+//   byDay?: number[];   // 0=Sun, 1=Mon, ..., 6=Sat — WEEKLY ONLY
 //   until?: string;     // YYYY-MM-DD, inclusive end-of-day
 // }
 // ```
 //
-// `byDay` is optional. When omitted (or empty), the implementation
-// infers `[ baseStart's weekday ]` — preserving v1 ("Repeat weekly"
-// toggle implies the day of the base block).
+// `byDay` is weekly-only — ignored for monthly and yearly rules. When
+// omitted on a weekly rule (or empty), the implementation infers
+// `[ baseStart's weekday ]` — preserving v1 ("Repeat weekly" toggle
+// implies the day of the base block).
 //
 // `until` is optional. When omitted, the series repeats indefinitely
 // (still bounded by MAX_OCCURRENCES + the caller's range, so no
 // runaway expansion).
 //
+// Monthly rules walk +1 month from the base, preserving the
+// day-of-month and wall-clock time. If the next month is shorter
+// than the base's day (Jan 31 → Feb), the occurrence clamps to the
+// last day of that month, then resumes the natural day in subsequent
+// months that fit it.
+//
+// Yearly rules walk +1 year preserving month + day-of-month +
+// wall-clock. Feb 29 clamps to Feb 28 in non-leap years.
+//
 // The shape stays a discriminated-union-friendly object so we can grow
 // it later (`count`, `interval`, `byMonth`, etc.) without a schema
 // change — bump the parser/expander.
 
+export type RecurrenceFreq = 'weekly' | 'monthly' | 'yearly';
+
 export type RecurrenceRule = {
-  freq: 'weekly';
-  /** 0=Sun, 1=Mon, ..., 6=Sat. Optional; falls back to the base block's
-   * weekday when omitted or empty. */
+  freq: RecurrenceFreq;
+  /** 0=Sun, 1=Mon, ..., 6=Sat. WEEKLY only — ignored for monthly /
+   * yearly rules. Falls back to the base block's weekday when omitted
+   * or empty (on weekly rules). */
   byDay?: number[];
   /** YYYY-MM-DD, INCLUSIVE end-of-day. After this date the series
    * stops. Optional — omitted = repeats indefinitely. */
@@ -46,7 +59,7 @@ const MAX_OCCURRENCES = 500;
 export function isRecurrenceRule(v: unknown): v is RecurrenceRule {
   if (typeof v !== 'object' || v === null) return false;
   const obj = v as Record<string, unknown>;
-  return obj.freq === 'weekly';
+  return obj.freq === 'weekly' || obj.freq === 'monthly' || obj.freq === 'yearly';
 }
 
 /** Parse `until` (YYYY-MM-DD) into a local-zone Date at the END of the
@@ -61,6 +74,106 @@ function parseUntil(until: string | undefined): Date | null {
   const mo = Number(m[2]) - 1;
   const d = Number(m[3]);
   return new Date(y, mo, d, 23, 59, 59, 999);
+}
+
+/**
+ * Build a Date at the same wall-clock as `base` but on a different
+ * month + day. When the target day exceeds the target month's
+ * length, clamps to the last valid day of that month (e.g. Jan 31
+ * → Feb 28). Wall-clock components (hour, minute, second, ms) are
+ * always preserved.
+ */
+function dateAt(
+  year: number,
+  monthIndex: number,
+  desiredDay: number,
+  hour: number,
+  minute: number,
+  second: number,
+  ms: number,
+): Date {
+  // Days in `monthIndex` of `year`. Day 0 of the next month = last day
+  // of the current month, which is what JS Date does naturally.
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const day = Math.min(desiredDay, daysInMonth);
+  return new Date(year, monthIndex, day, hour, minute, second, ms);
+}
+
+/**
+ * Monthly / yearly expansion. Step size is +1 month or +1 year per
+ * iteration. The base's day-of-month + wall-clock are preserved on
+ * every occurrence; month-end overflow clamps (Jan 31 → Feb 28).
+ *
+ * `byDay` is ignored for monthly + yearly rules — it's a weekly-only
+ * selector. Tests cover the ignore behaviour explicitly.
+ *
+ * skipKeys / movesByKey use the same `originalStart.toISOString()`
+ * key shape as the weekly path so callers don't have to switch on
+ * `freq` to build them.
+ */
+function expandFixedStep(args: {
+  rule: RecurrenceRule;
+  baseStart: Date;
+  baseEnd: Date;
+  rangeStart: Date;
+  rangeEnd: Date;
+  skipKeys?: Set<string>;
+  movesByKey?: Map<string, { newStart: Date; newEnd: Date }>;
+}): Array<{ startsAt: Date; endsAt: Date; originalStart?: Date }> {
+  const durationMs = args.baseEnd.getTime() - args.baseStart.getTime();
+  if (durationMs < 0) return [];
+  const rangeStartMs = args.rangeStart.getTime();
+  const rangeEndMs = args.rangeEnd.getTime();
+  const untilEnd = parseUntil(args.rule.until);
+  const untilMs = untilEnd?.getTime() ?? Infinity;
+  if (untilMs < args.baseStart.getTime()) return [];
+
+  const baseYear = args.baseStart.getFullYear();
+  const baseMonth = args.baseStart.getMonth();
+  // Preserve the natural day-of-month from the base — when a month is
+  // too short (Feb after a Jan-31 base), `dateAt` clamps, but the
+  // following months pick the natural day back up.
+  const baseDay = args.baseStart.getDate();
+  const hour = args.baseStart.getHours();
+  const minute = args.baseStart.getMinutes();
+  const second = args.baseStart.getSeconds();
+  const ms = args.baseStart.getMilliseconds();
+  const isYearly = args.rule.freq === 'yearly';
+
+  const out: Array<{ startsAt: Date; endsAt: Date; originalStart?: Date }> = [];
+  for (let n = 0; n < MAX_OCCURRENCES; n++) {
+    const year = isYearly ? baseYear + n : baseYear;
+    const monthIndex = isYearly ? baseMonth : baseMonth + n;
+    const start = dateAt(year, monthIndex, baseDay, hour, minute, second, ms);
+    const startMs = start.getTime();
+    if (startMs > untilMs) break;
+    if (startMs >= rangeEndMs) break; // past the range — done
+
+    const originalIso = start.toISOString();
+    if (args.skipKeys && args.skipKeys.has(originalIso)) continue;
+
+    const move = args.movesByKey?.get(originalIso);
+    if (move) {
+      const moveStartMs = move.newStart.getTime();
+      const moveEndMs = move.newEnd.getTime();
+      if (moveStartMs >= rangeEndMs) continue;
+      if (moveEndMs <= rangeStartMs) continue;
+      out.push({
+        startsAt: new Date(moveStartMs),
+        endsAt: new Date(moveEndMs),
+        originalStart: new Date(startMs),
+      });
+      continue;
+    }
+
+    const endMs = startMs + durationMs;
+    if (endMs <= rangeStartMs) continue; // ends before the window starts
+    out.push({ startsAt: start, endsAt: new Date(endMs) });
+  }
+  if (args.movesByKey && args.movesByKey.size > 0) {
+    out.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  }
+  return out;
 }
 
 /**
@@ -109,6 +222,9 @@ export function expandOccurrences(args: {
    * (more conservative — produces no result for that key). */
   movesByKey?: Map<string, { newStart: Date; newEnd: Date }>;
 }): Array<{ startsAt: Date; endsAt: Date; originalStart?: Date }> {
+  if (args.rule.freq === 'monthly' || args.rule.freq === 'yearly') {
+    return expandFixedStep(args);
+  }
   if (args.rule.freq !== 'weekly') return [];
 
   const durationMs = args.baseEnd.getTime() - args.baseStart.getTime();
