@@ -334,6 +334,133 @@ describe('expandOccurrences (skipKeys)', () => {
   });
 });
 
+describe('expandOccurrences (movesByKey)', () => {
+  // Mon May 11 2026 14:00 → 15:00 weekly series.
+  const baseStart = new Date(2026, 4, 11, 14, 0);
+  const baseEnd = new Date(2026, 4, 11, 15, 0);
+  const rule: RecurrenceRule = { freq: 'weekly' };
+
+  it("replaces an occurrence's startsAt/endsAt when its ISO start has a move entry", () => {
+    // Move May 18 from 14:00→15:00 to 16:00→17:30.
+    const may18 = new Date(2026, 4, 18, 14, 0);
+    const movedStart = new Date(2026, 4, 18, 16, 0);
+    const movedEnd = new Date(2026, 4, 18, 17, 30);
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+      movesByKey: new Map([
+        [may18.toISOString(), { newStart: movedStart, newEnd: movedEnd }],
+      ]),
+    });
+    // 2 occurrences: May 11 unchanged, May 18 moved.
+    expect(out).toHaveLength(2);
+    expect(out[0].startsAt.toISOString()).toBe(baseStart.toISOString());
+    expect(out[0].originalStart).toBeUndefined();
+    expect(out[1].startsAt.toISOString()).toBe(movedStart.toISOString());
+    expect(out[1].endsAt.toISOString()).toBe(movedEnd.toISOString());
+    // The MOVED occurrence carries its pre-move start so callers can
+    // find the right exception row to update / delete.
+    expect(out[1].originalStart?.toISOString()).toBe(may18.toISOString());
+  });
+
+  it('returns chronological output even when a move pushes an occurrence past its neighbors', () => {
+    // Move May 11 ahead by 2 weeks to May 25 18:00 (past May 18 + the
+    // series's own May 25 14:00).
+    const may11 = baseStart;
+    const movedStart = new Date(2026, 4, 25, 18, 0);
+    const movedEnd = new Date(2026, 4, 25, 19, 0);
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 26, 0, 0),
+      movesByKey: new Map([
+        [may11.toISOString(), { newStart: movedStart, newEnd: movedEnd }],
+      ]),
+    });
+    expect(out).toHaveLength(3);
+    expect(out.map((o) => o.startsAt.toISOString())).toEqual([
+      new Date(2026, 4, 18, 14, 0).toISOString(),
+      new Date(2026, 4, 25, 14, 0).toISOString(),
+      movedStart.toISOString(),
+    ]);
+    expect(out[0].originalStart).toBeUndefined();
+    expect(out[1].originalStart).toBeUndefined();
+    expect(out[2].originalStart?.toISOString()).toBe(may11.toISOString());
+  });
+
+  it("treats moves whose new_start is INSIDE the range but whose original_start is BEFORE as in-range", () => {
+    // Series starting May 4; the May 4 occurrence is BEFORE the [May
+    // 11, May 18) window but a move pulls it INTO the window at May 14.
+    const out = expandOccurrences({
+      rule,
+      baseStart: new Date(2026, 4, 4, 14, 0),
+      baseEnd: new Date(2026, 4, 4, 15, 0),
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 18, 0, 0),
+      movesByKey: new Map([
+        [
+          new Date(2026, 4, 4, 14, 0).toISOString(),
+          {
+            newStart: new Date(2026, 4, 14, 14, 0),
+            newEnd: new Date(2026, 4, 14, 15, 0),
+          },
+        ],
+      ]),
+    });
+    const isos = out.map((o) => o.startsAt.toISOString()).sort();
+    expect(isos).toContain(new Date(2026, 4, 11, 14, 0).toISOString());
+    expect(isos).toContain(new Date(2026, 4, 14, 14, 0).toISOString());
+  });
+
+  it("drops moves whose new_start is OUTSIDE the range", () => {
+    // Move May 18 to June 15 (after window).
+    const may18 = new Date(2026, 4, 18, 14, 0);
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+      movesByKey: new Map([
+        [
+          may18.toISOString(),
+          {
+            newStart: new Date(2026, 5, 15, 14, 0),
+            newEnd: new Date(2026, 5, 15, 15, 0),
+          },
+        ],
+      ]),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11]);
+  });
+
+  it('lets skipKeys and movesByKey coexist (skip wins for the same key)', () => {
+    // Defensive: if both a skip and a move exist for the same
+    // original_start, skip wins.
+    const may18 = new Date(2026, 4, 18, 14, 0);
+    const out = expandOccurrences({
+      rule,
+      baseStart,
+      baseEnd,
+      rangeStart: new Date(2026, 4, 11, 0, 0),
+      rangeEnd: new Date(2026, 4, 25, 0, 0),
+      skipKeys: new Set([may18.toISOString()]),
+      movesByKey: new Map([
+        [
+          may18.toISOString(),
+          { newStart: new Date(2026, 4, 18, 16, 0), newEnd: new Date(2026, 4, 18, 17, 0) },
+        ],
+      ]),
+    });
+    expect(out.map((o) => o.startsAt.getDate())).toEqual([11]);
+  });
+});
+
 describe('isRecurrenceRule (extended shapes)', () => {
   it('accepts a rule with byDay', () => {
     expect(isRecurrenceRule({ freq: 'weekly', byDay: [1, 3] })).toBe(true);

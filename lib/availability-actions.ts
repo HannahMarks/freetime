@@ -139,6 +139,44 @@ export async function deleteBusyBlock(id: string): Promise<ActionResult> {
 }
 
 /**
+ * Insert (or replace) a `move` exception for a single occurrence of a
+ * recurring busy_block series. The series row stays put — only this
+ * one occurrence's start / end is rewritten.
+ *
+ * `originalStart` MUST be the PRE-move timestamp `expandOccurrences`
+ * emits for this slot, NOT the currently-displayed (moved) time. For
+ * an occurrence that has already been moved once, callers should pass
+ * `CalendarItem.originalStart` rather than `startsAt` — otherwise the
+ * upsert plants a new exception rooted at the moved time, orphaning
+ * the original one and letting the natural occurrence re-appear.
+ *
+ * Idempotent on the composite PK — re-moving the same occurrence
+ * overwrites the existing exception's new_start / new_end.
+ */
+export async function moveBusyBlockOccurrence(args: {
+  seriesId: string;
+  originalStart: Date;
+  newStart: Date;
+  newEnd: Date;
+}): Promise<ActionResult> {
+  const { error } = await supabase
+    .from('busy_block_exceptions')
+    .upsert(
+      {
+        series_id: args.seriesId,
+        original_start: args.originalStart.toISOString(),
+        action: 'move',
+        new_start: args.newStart.toISOString(),
+        new_end: args.newEnd.toISOString(),
+      },
+      { onConflict: 'series_id,original_start' },
+    );
+
+  if (error) return { error: describeError("Couldn't move this occurrence", error) };
+  return { error: null };
+}
+
+/**
  * Insert a `skip` exception for a single occurrence of a recurring
  * busy_block series. The series row stays put — only this one
  * occurrence is hidden from `listCalendarItems`.

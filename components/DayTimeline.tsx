@@ -252,11 +252,14 @@ function BusyBlockOverlay({ block, top, height, owned, onPress, onReschedule }: 
         runOnJS(commit)(snappedMinutes);
       }
     })
-    // Recurring blocks: drag-to-reschedule is disabled in v1. Moving one
-    // occurrence has ambiguous semantics (just-this-one vs whole series),
-    // and per-occurrence overrides aren't in the schema yet. Editing the
-    // series via the sheet (pencil → edit form) still works.
-    .enabled(owned && !!onReschedule && !block.recurrenceRule);
+    // Drag-to-reschedule enabled for both one-off and recurring blocks.
+    // The parent (calendar screen) routes the reschedule to either
+    // `updateBusyBlock` (one-offs — moves the row) or
+    // `moveBusyBlockOccurrence` (recurring — writes a `move` exception
+    // for just-this-one occurrence). The parent makes that decision
+    // because it knows about both actions; here we just emit the
+    // delta + the item, same shape regardless of recurrence.
+    .enabled(owned && !!onReschedule);
 
   // Compute the time range to render: original, or the would-land-at
   // range while the user is dragging.
