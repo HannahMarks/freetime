@@ -58,6 +58,26 @@ npm run web        # or `ios` / `android`
    npm run db:push
    ```
 
+### Pulling a PR that adds a migration
+
+If the PR you just pulled added or modified anything under `supabase/migrations/`, **apply migrations to your remote DB before reloading the app:**
+
+```bash
+npm run db:push
+```
+
+The CLI shows a confirmation prompt and only applies migrations the linked project hasn't seen yet — safe to run on every pull.
+
+If you skip this, the app will hit a `42703 column does not exist` (or `PGRST205 table not found`) error the moment a query touches the new schema. The error surfaces as either a broken calendar or a `console.error` in the dev console depending on how defensively the calling code handles it.
+
+A quick way to know whether the latest pull touched migrations:
+
+```bash
+git diff HEAD~1 HEAD --name-only -- supabase/migrations
+```
+
+If anything prints, run `npm run db:push`.
+
 ### Unit tests
 
 ```bash
