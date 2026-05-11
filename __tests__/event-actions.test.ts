@@ -3,6 +3,7 @@ import {
   deleteEvent,
   inviteFriends,
   listEvents,
+  respondToInvite,
   updateEvent,
 } from '../lib/event-actions';
 import { supabase } from '../lib/supabase';
@@ -316,6 +317,36 @@ describe('event-actions', () => {
       });
       expect(error).toBeNull();
       expect(data).toEqual([]);
+    });
+  });
+
+  describe('respondToInvite', () => {
+    it('updates event_invites for the live user with the requested status', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { error } = await respondToInvite({ eventId: 'ev1', status: 'accepted' });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('event_invites');
+      expect(builder.update).toHaveBeenCalledWith({ status: 'accepted' });
+      expect(builder.eq).toHaveBeenNthCalledWith(1, 'event_id', 'ev1');
+      expect(builder.eq).toHaveBeenNthCalledWith(2, 'invitee_id', 'me-id');
+    });
+
+    it('returns "not signed in" when there\'s no session', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: null } });
+      const { error } = await respondToInvite({ eventId: 'ev1', status: 'accepted' });
+      expect(error).toMatch(/not signed in/i);
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it('returns a friendly error on DB failure', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await respondToInvite({ eventId: 'ev1', status: 'declined' });
+      expect(error).toMatch(/couldn't update your rsvp/i);
     });
   });
 

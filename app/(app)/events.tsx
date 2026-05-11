@@ -208,6 +208,7 @@ export default function EventsScreen() {
         defaultDate={todayIso}
         editing={editing}
         friends={friends}
+        currentUserId={session?.user.id}
         onClose={() => setSheetOpen(false)}
         onSaved={() => {
           // Refetch on any successful save / delete so the list
