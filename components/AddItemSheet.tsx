@@ -27,6 +27,8 @@ import {
   createUnavailableDay,
   deleteBusyBlock,
   deleteUnavailableDay,
+  editUnavailableDayOccurrence,
+  moveBusyBlockOccurrence,
   skipBusyBlockOccurrence,
   skipUnavailableDayOccurrence,
   updateBusyBlock,
@@ -388,26 +390,31 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     }
   }, [visible, editing, editingKind, initialStart, initialEnd]);
 
-  async function handleSave() {
-    if (submitting) return;
+  /** Pure projection — turn current state into a recurrence rule (or
+   * null if the toggle is off). Used by both the series and
+   * occurrence-override save paths. */
+  function buildRecurrenceRule(): RecurrenceRule | null {
+    if (!repeatWeekly) return null;
+    const rule: RecurrenceRule = { freq: 'weekly' };
+    if (byDay.length > 0) rule.byDay = [...byDay].sort((a, b) => a - b);
+    if (until) rule.until = until;
+    return rule;
+  }
+
+  /** "Save changes to entire series" path. Mutates the series's base
+   * row directly via updateBusyBlock / updateUnavailableDay (or
+   * createBusyBlock / createUnavailableDay if we're not editing). */
+  async function runSeriesSave() {
     setSubmitting(true);
     try {
       const trimmedTitle = title.trim() || null;
       const trimmedLocation = location.trim() || null;
       const trimmedNotes = notes.trim() || null;
+      const recurrenceRule = buildRecurrenceRule();
       if (kind === 'busy') {
         if (end <= start) {
           toast.error('End time must be after start time.');
           return;
-        }
-        // Project the toggle + chips + until-date into the storage
-        // shape. Empty byDay → omitted (helper falls back to the base's
-        // weekday). Null until → omitted (series repeats indefinitely).
-        let recurrenceRule: RecurrenceRule | null = null;
-        if (repeatWeekly) {
-          recurrenceRule = { freq: 'weekly' };
-          if (byDay.length > 0) recurrenceRule.byDay = [...byDay].sort((a, b) => a - b);
-          if (until) recurrenceRule.until = until;
         }
         const { error } =
           editing?.kind === 'busy_block'
@@ -433,15 +440,6 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           return;
         }
       } else {
-        // Same recurrence projection as the busy branch — empty byDay
-        // → omitted, null until → omitted, repeatWeekly off → null
-        // (one-off).
-        let recurrenceRule: RecurrenceRule | null = null;
-        if (repeatWeekly) {
-          recurrenceRule = { freq: 'weekly' };
-          if (byDay.length > 0) recurrenceRule.byDay = [...byDay].sort((a, b) => a - b);
-          if (until) recurrenceRule.until = until;
-        }
         const { error } =
           editing?.kind === 'unavailable_day'
             ? await updateUnavailableDay({
@@ -470,6 +468,93 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /** "Save changes to this event only" path. Writes a `move`
+   * exception with the new times + any title/notes/location
+   * overrides, so only this one occurrence changes. Only fires for
+   * recurring items being edited (otherwise there's no "series" to
+   * leave alone). */
+  async function runOccurrenceOverrideSave() {
+    if (!editing) return;
+    setSubmitting(true);
+    try {
+      const trimmedTitle = title.trim() || null;
+      const trimmedLocation = location.trim() || null;
+      const trimmedNotes = notes.trim() || null;
+      if (editing.kind === 'busy_block') {
+        if (end <= start) {
+          toast.error('End time must be after start time.');
+          return;
+        }
+        // originalStart anchors the upsert — use editing.originalStart
+        // (the pre-move time on an already-moved occurrence) when
+        // present, otherwise startsAt (an unmoved occurrence).
+        const { error } = await moveBusyBlockOccurrence({
+          seriesId: editing.id,
+          originalStart: editing.originalStart ?? editing.startsAt,
+          newStart: start,
+          newEnd: end,
+          title: trimmedTitle,
+          notes: trimmedNotes,
+          location: trimmedLocation,
+        });
+        if (error) {
+          toast.error(error);
+          return;
+        }
+      } else {
+        // unavailable_day occurrence — no time component, just maybe
+        // a new date + override title/notes. For v7 we don't surface
+        // a date-change UI in the sheet for unavailable_days (there's
+        // no DatePicker for occurrence-date), so newDate is omitted
+        // here and the action defaults it to originalDate (= an
+        // override-only exception).
+        const { error } = await editUnavailableDayOccurrence({
+          seriesUserId: editing.user.id,
+          seriesDate: editing.seriesDate ?? editing.date,
+          originalDate: editing.originalDate ?? editing.date,
+          title: trimmedTitle,
+          notes: trimmedNotes,
+        });
+        if (error) {
+          toast.error(error);
+          return;
+        }
+      }
+      onSaved();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleSave() {
+    if (submitting) return;
+    // When the user is editing a RECURRING occurrence, ask whether to
+    // apply changes to just this one or the whole series. For
+    // creation or one-off edits, fall straight through to the series
+    // path (which is also the only path that exists for those cases).
+    const isRecurringOccurrence = !!editing?.recurrenceRule;
+    if (!isRecurringOccurrence) {
+      runSeriesSave();
+      return;
+    }
+    Alert.alert('Save changes to', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'This event only',
+        onPress: () => {
+          runOccurrenceOverrideSave();
+        },
+      },
+      {
+        text: 'Entire series',
+        onPress: () => {
+          runSeriesSave();
+        },
+      },
+    ]);
   }
 
   async function handleCopy() {

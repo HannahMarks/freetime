@@ -158,21 +158,75 @@ export async function moveBusyBlockOccurrence(args: {
   originalStart: Date;
   newStart: Date;
   newEnd: Date;
+  /** v7: optional per-occurrence override metadata. Null = inherit
+   * from the series row. Useful for edit-just-this-one — the user
+   * can change the title/notes/location of one occurrence without
+   * touching the series. Passing `undefined` for a field omits it
+   * from the upsert payload (preserves any existing override);
+   * passing `null` explicitly clears it (reverts to series value). */
+  title?: string | null;
+  notes?: string | null;
+  location?: string | null;
 }): Promise<ActionResult> {
+  const payload: Record<string, unknown> = {
+    series_id: args.seriesId,
+    original_start: args.originalStart.toISOString(),
+    action: 'move',
+    new_start: args.newStart.toISOString(),
+    new_end: args.newEnd.toISOString(),
+  };
+  if (args.title !== undefined) payload.title = args.title;
+  if (args.notes !== undefined) payload.notes = args.notes;
+  if (args.location !== undefined) payload.location = args.location;
   const { error } = await supabase
     .from('busy_block_exceptions')
-    .upsert(
-      {
-        series_id: args.seriesId,
-        original_start: args.originalStart.toISOString(),
-        action: 'move',
-        new_start: args.newStart.toISOString(),
-        new_end: args.newEnd.toISOString(),
-      },
-      { onConflict: 'series_id,original_start' },
-    );
+    .upsert(payload, { onConflict: 'series_id,original_start' });
 
   if (error) return { error: describeError("Couldn't move this occurrence", error) };
+  return { error: null };
+}
+
+/**
+ * Insert (or replace) a `move` exception on a recurring
+ * unavailable_day series, optionally with override title / notes.
+ * v7 use case: edit-just-this-one. The user opens a recurring
+ * unavailable_day occurrence, edits the title to "Sick day", picks
+ * "Save just this occurrence" — we write a move exception whose
+ * `new_date` equals `original_date` (no date change) but
+ * `title='Sick day'` overrides the series's "Mondays off".
+ *
+ * `originalDate` MUST be the PRE-move date (use
+ * `CalendarItem.originalDate ?? CalendarItem.date`).
+ *
+ * Idempotent on the composite PK — re-editing the same occurrence
+ * overwrites the existing exception's new_date / overrides.
+ */
+export async function editUnavailableDayOccurrence(args: {
+  seriesUserId: string;
+  seriesDate: string;
+  originalDate: string;
+  /** Optional. Defaults to `originalDate` (no date change — just an
+   * override of title/notes). */
+  newDate?: string;
+  title?: string | null;
+  notes?: string | null;
+}): Promise<ActionResult> {
+  const payload: Record<string, unknown> = {
+    series_user_id: args.seriesUserId,
+    series_date: args.seriesDate,
+    original_date: args.originalDate,
+    action: 'move',
+    new_date: args.newDate ?? args.originalDate,
+  };
+  if (args.title !== undefined) payload.title = args.title;
+  if (args.notes !== undefined) payload.notes = args.notes;
+  const { error } = await supabase
+    .from('unavailable_day_exceptions')
+    .upsert(payload, {
+      onConflict: 'series_user_id,series_date,original_date',
+    });
+
+  if (error) return { error: describeError("Couldn't save this occurrence", error) };
   return { error: null };
 }
 

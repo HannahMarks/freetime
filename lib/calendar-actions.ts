@@ -122,11 +122,24 @@ export async function listCalendarItems(args: {
     string,
     Map<string, { newStart: Date; newEnd: Date }>
   >();
+  // Per-occurrence override metadata for moved busy_block occurrences,
+  // keyed by `${series_id}|${originalIso}`. v7 lets a move exception
+  // carry title / notes / location overrides; this map stores them so
+  // the per-occurrence loop below can merge them onto the
+  // CalendarItem after `expandOccurrences` returns the moved times.
+  // (Skip rows never carry overrides — they're hidden — but the
+  // application doesn't write them on skip rows anyway.)
+  const busyOverridesByKey = new Map<
+    string,
+    { title: string | null; notes: string | null; location: string | null }
+  >();
   if (recurringBusyRows.length > 0) {
     const seriesIds = recurringBusyRows.map((r) => r.id);
     const exceptionsResult = await supabase
       .from('busy_block_exceptions')
-      .select('series_id, original_start, action, new_start, new_end')
+      .select(
+        'series_id, original_start, action, new_start, new_end, title, notes, location',
+      )
       .in('series_id', seriesIds);
     if (exceptionsResult.error) {
       // eslint-disable-next-line no-console
@@ -140,6 +153,9 @@ export async function listCalendarItems(args: {
         action: string;
         new_start: string | null;
         new_end: string | null;
+        title: string | null;
+        notes: string | null;
+        location: string | null;
       }>) {
         // Normalise to the ISO format expandOccurrences emits, so the
         // string comparison inside the helper is exact regardless of
@@ -166,6 +182,15 @@ export async function listCalendarItems(args: {
           } else {
             movesBySeriesId.set(ex.series_id, new Map([[key, move]]));
           }
+          // v7: stash any override metadata on this move row so the
+          // per-occurrence loop below can merge it onto the
+          // CalendarItem. Null fields fall back to the series's
+          // values (handled at merge-time).
+          busyOverridesByKey.set(`${ex.series_id}|${key}`, {
+            title: ex.title,
+            notes: ex.notes,
+            location: ex.location,
+          });
         }
       }
     }
@@ -193,15 +218,33 @@ export async function listCalendarItems(args: {
         movesByKey: movesBySeriesId.get(row.id),
       });
       for (const occ of occurrences) {
+        // v7: for a moved occurrence, merge any override metadata
+        // from the exception row on top of the series's metadata.
+        // Null overrides fall back to the series's value. Lookup key
+        // uses originalStart (pre-move) since exceptions are keyed
+        // by original, not by the moved time.
+        let title = row.title;
+        let notes = row.notes;
+        let location = row.location;
+        if (occ.originalStart) {
+          const override = busyOverridesByKey.get(
+            `${row.id}|${occ.originalStart.toISOString()}`,
+          );
+          if (override) {
+            if (override.title !== null) title = override.title;
+            if (override.notes !== null) notes = override.notes;
+            if (override.location !== null) location = override.location;
+          }
+        }
         items.push({
           kind: 'busy_block',
           id: row.id,
           user: row.user,
           startsAt: occ.startsAt,
           endsAt: occ.endsAt,
-          title: row.title,
-          notes: row.notes,
-          location: row.location,
+          title,
+          notes,
+          location,
           recurrenceRule: row.recurrence_rule,
           originalStart: occ.originalStart,
         });
@@ -239,6 +282,13 @@ export async function listCalendarItems(args: {
     string,
     Map<string, { newStart: Date; newEnd: Date }>
   >();
+  // v7 override metadata for moved unavailable_day occurrences. Keyed
+  // by `${user_id}|${series_date}|${originalIso}` so the
+  // per-occurrence loop can look it up cheaply.
+  const dayOverridesByKey = new Map<
+    string,
+    { title: string | null; notes: string | null }
+  >();
   if (recurringDayRows.length > 0) {
     // PostgREST supports composite-key lookups via `.or()` with one
     // clause per series. Each clause AND's user_id + series_date.
@@ -251,7 +301,9 @@ export async function listCalendarItems(args: {
       .join(',');
     const dayExceptionsResult = await supabase
       .from('unavailable_day_exceptions')
-      .select('series_user_id, series_date, original_date, action, new_date')
+      .select(
+        'series_user_id, series_date, original_date, action, new_date, title, notes',
+      )
       .or(orClauses);
     if (dayExceptionsResult.error) {
       // eslint-disable-next-line no-console
@@ -268,6 +320,8 @@ export async function listCalendarItems(args: {
         original_date: string;
         action: string;
         new_date: string | null;
+        title: string | null;
+        notes: string | null;
       }>) {
         const seriesKey = `${ex.series_user_id}|${ex.series_date}`;
         // Helper's emitted occurrence has `startsAt` at local midnight of
@@ -298,6 +352,11 @@ export async function listCalendarItems(args: {
               new Map([[originalIso, { newStart, newEnd }]]),
             );
           }
+          // v7: stash override metadata on this move row.
+          dayOverridesByKey.set(`${seriesKey}|${originalIso}`, {
+            title: ex.title,
+            notes: ex.notes,
+          });
         }
       }
     }
@@ -337,12 +396,25 @@ export async function listCalendarItems(args: {
           const o = occ.originalStart;
           originalDate = `${o.getFullYear()}-${String(o.getMonth() + 1).padStart(2, '0')}-${String(o.getDate()).padStart(2, '0')}`;
         }
+        // v7: merge override metadata onto a moved occurrence. Null
+        // overrides fall back to the series's value.
+        let title = row.title;
+        let notes = row.notes;
+        if (occ.originalStart) {
+          const override = dayOverridesByKey.get(
+            `${seriesKey}|${occ.originalStart.toISOString()}`,
+          );
+          if (override) {
+            if (override.title !== null) title = override.title;
+            if (override.notes !== null) notes = override.notes;
+          }
+        }
         items.push({
           kind: 'unavailable_day',
           user: row.user,
           date: occDate,
-          title: row.title,
-          notes: row.notes,
+          title,
+          notes,
           recurrenceRule: row.recurrence_rule,
           seriesDate: row.date,
           originalDate,
