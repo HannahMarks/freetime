@@ -68,6 +68,7 @@ describe('availability-actions', () => {
         ends_at: endsAt.toISOString(),
         notes: 'Finalize Q3 plan',
         location: 'Cafe Borrone',
+        recurrence_rule: null,
       });
     });
 
@@ -82,6 +83,43 @@ describe('availability-actions', () => {
 
       expect(builder.insert).toHaveBeenCalledWith(
         expect.objectContaining({ notes: null, location: null }),
+      );
+    });
+
+    it('persists recurrence_rule when provided', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await createBusyBlock({
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ recurrence_rule: { freq: 'weekly' } }),
+      );
+    });
+
+    it('persists recurrence_rule as null when omitted (one-off block)', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await createBusyBlock({
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: null,
+        notes: null,
+        location: null,
+      });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ recurrence_rule: null }),
       );
     });
 
@@ -192,8 +230,28 @@ describe('availability-actions', () => {
         ends_at: endsAt.toISOString(),
         notes: 'Bring the sales deck',
         location: 'Conference Room B',
+        recurrence_rule: null,
       });
       expect(builder.eq).toHaveBeenCalledWith('id', 'bb1');
+    });
+
+    it('writes recurrence_rule when provided (turns a one-off into a series, or vice versa)', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await updateBusyBlock({
+        id: 'bb1',
+        startsAt: new Date(2026, 4, 11, 14, 0),
+        endsAt: new Date(2026, 4, 11, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      });
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ recurrence_rule: { freq: 'weekly' } }),
+      );
     });
 
     it('translates DB errors', async () => {

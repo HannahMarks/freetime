@@ -110,6 +110,7 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 - ✅ Notes + location — `notes` + `location` columns on `busy_blocks`, `notes` on `unavailable_days`; multi-line Notes input + single-line Location input in the sheet ([#24](https://github.com/HannahMarks/freetime/pull/24))
 - ✅ Drag-to-reschedule — long-press a busy_block on the day timeline and pan to a new time; release commits via `updateBusyBlock`, snapping to 15-min increments and preserving duration ([#25](https://github.com/HannahMarks/freetime/pull/25))
 - 🚧 Swipe-to-dismiss month grid — drag the month grid upward past a threshold to hide it; chevron still toggles it back (#26)
+- 🚧 Recurring busy_blocks (v1: weekly) — `recurrence_rule` JSONB column on `busy_blocks`; client-side `expandOccurrences()` walks each series at +7d intervals (DST-safe via `setDate`) and `listCalendarItems` returns one CalendarItem per occurrence in the requested window; AddItemSheet has a "Repeat weekly" toggle in the form and a "Repeats weekly" line in view mode; drag-to-reschedule is disabled on recurring occurrences in v1
 
 ### Phase 2 — events + invites
 

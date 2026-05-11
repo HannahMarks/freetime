@@ -31,6 +31,7 @@ import {
   updateUnavailableDay,
 } from '../lib/availability-actions';
 import { CalendarItem, formatTimeRange } from '../lib/calendar-helpers';
+import type { RecurrenceRule } from '../lib/recurrence';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
@@ -147,6 +148,12 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   const [formMode, setFormMode] = useState<boolean>(!editing);
   // Custom popover menu state — opens below the three-dots button.
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
+  // Repeat-weekly toggle state. v1 of recurrence supports just this single
+  // option ("every Monday at 2pm" — weekday + time-of-day come from the
+  // base block's startsAt). Stored as a boolean here, projected into a
+  // `{ freq: 'weekly' }` rule on save (or null when off). Always false in
+  // unavailable-day mode — recurring all-day markers are out of v1 scope.
+  const [repeatWeekly, setRepeatWeekly] = useState<boolean>(false);
 
   const initialStart = useMemo(() => {
     if (editing?.kind === 'busy_block') return editing.startsAt;
@@ -288,6 +295,11 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
       setEnd(initialEnd);
       setFormMode(!editing);
       setMenuOpen(false);
+      // Pre-fill the toggle from the editing item. For an unavailable_day
+      // the field is always considered off (no recurrence support yet).
+      setRepeatWeekly(
+        editing?.kind === 'busy_block' && editing.recurrenceRule != null,
+      );
     }
   }, [visible, editing, editingKind, initialStart, initialEnd]);
 
@@ -303,6 +315,12 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
           toast.error('End time must be after start time.');
           return;
         }
+        // Project the v1 toggle into the storage shape. Future variants
+        // (byDay picker, until-date) will branch here to build a richer
+        // rule — for now it's just present-or-null.
+        const recurrenceRule: RecurrenceRule | null = repeatWeekly
+          ? { freq: 'weekly' }
+          : null;
         const { error } =
           editing?.kind === 'busy_block'
             ? await updateBusyBlock({
@@ -312,6 +330,7 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 title: trimmedTitle,
                 notes: trimmedNotes,
                 location: trimmedLocation,
+                recurrenceRule,
               })
             : await createBusyBlock({
                 startsAt: start,
@@ -319,6 +338,7 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 title: trimmedTitle,
                 notes: trimmedNotes,
                 location: trimmedLocation,
+                recurrenceRule,
               });
         if (error) {
           toast.error(error);
@@ -534,6 +554,18 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 <Text style={styles.viewValue} testID="view-date">{viewDate}</Text>
                 <Text style={styles.viewValue} testID="view-time">{viewTimeRange}</Text>
               </View>
+              {editing && editing.kind === 'busy_block' && editing.recurrenceRule ? (
+                // v1 only supports `freq: 'weekly'`. The text is a fixed
+                // string for now; a future PR with a day-of-week picker
+                // / until-date will format this with the actual selected
+                // days, e.g. "Repeats weekly on Mon, Wed, Fri until Jul 1".
+                <View style={styles.viewRow}>
+                  <Text style={styles.viewLabel}>Repeats</Text>
+                  <Text style={styles.viewValue} testID="view-recurrence">
+                    Repeats weekly
+                  </Text>
+                </View>
+              ) : null}
               {editing && editing.kind === 'busy_block' && editing.location ? (
                 <View style={styles.viewRow}>
                   <Text style={styles.viewLabel}>Location</Text>
@@ -635,6 +667,41 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                       onChangeText={setLocation}
                     />
                   </View>
+
+                  {/* Repeat-weekly toggle. v1 of recurrence is just on/off:
+                      "every {weekday-of-startsAt} at {time-of-startsAt}". A
+                      future PR will surface the day-of-week picker + an
+                      until-date in a deeper recurrence section. The toggle
+                      is built as a tap-to-flip Pressable rather than RN's
+                      Switch so it matches the rest of the sheet's
+                      monochrome aesthetic and works without the platform
+                      Switch's iOS green tint. */}
+                  <Pressable
+                    onPress={() => setRepeatWeekly((v) => !v)}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: repeatWeekly }}
+                    accessibilityLabel="Repeat weekly"
+                    testID="repeat-weekly-toggle"
+                    style={({ pressed }) => [
+                      styles.repeatRow,
+                      pressed && styles.repeatRowPressed,
+                    ]}
+                  >
+                    <Text style={styles.repeatLabel}>Repeat weekly</Text>
+                    <View
+                      style={[
+                        styles.repeatSwitch,
+                        repeatWeekly && styles.repeatSwitchOn,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.repeatSwitchKnob,
+                          repeatWeekly && styles.repeatSwitchKnobOn,
+                        ]}
+                      />
+                    </View>
+                  </Pressable>
                 </>
               ) : null}
 
@@ -851,6 +918,46 @@ const styles = StyleSheet.create({
   },
   notesInput: {
     minHeight: 96,
+  },
+  // Repeat-weekly row: label on the left, custom mini-switch on the right.
+  // Padded vertically so the tap target is comfortable, with the same
+  // border treatment as the input fields above so it reads as a sibling
+  // form control rather than a separate UI element.
+  repeatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+  },
+  repeatRowPressed: { backgroundColor: '#f7f7f7' },
+  repeatLabel: { fontSize: 16, color: '#111' },
+  // Mini-switch geometry — a 36×22 pill with a 16×16 knob that slides
+  // from the left edge to the right edge. We hand-roll it instead of
+  // using RN's Switch so the off / on visuals match the rest of the
+  // sheet's monochrome aesthetic (RN Switch defaults to platform colors,
+  // most notably iOS green which would clash).
+  repeatSwitch: {
+    width: 36,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#d1d1d1',
+    padding: 3,
+    justifyContent: 'center',
+  },
+  repeatSwitchOn: { backgroundColor: '#111' },
+  repeatSwitchKnob: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  repeatSwitchKnobOn: {
+    // Translate the knob to the right edge of the track.
+    transform: [{ translateX: 14 }],
   },
   timeRow: {
     flexDirection: 'row',
