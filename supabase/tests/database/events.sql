@@ -36,15 +36,15 @@ set local role postgres;
 
 insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, aud, role)
 values
-  ('00000000-0000-0000-0000-0000000000h1', 'hana@example.test', '', now(),
+  ('00000000-0000-0000-0000-00000000000a', 'hana@example.test', '', now(),
    '{"display_name":"Hana","color":"#3F51B5"}'::jsonb, 'authenticated', 'authenticated'),
-  ('00000000-0000-0000-0000-0000000000h2', 'ira@example.test', '', now(),
+  ('00000000-0000-0000-0000-00000000000b', 'ira@example.test', '', now(),
    '{"display_name":"Ira","color":"#009688"}'::jsonb, 'authenticated', 'authenticated');
 
 -- valid_range CHECK: ends_at MUST be after starts_at.
 select throws_ok(
   $$insert into public.events (owner_id, title, starts_at, ends_at)
-    values ('00000000-0000-0000-0000-0000000000h1', 'Backwards',
+    values ('00000000-0000-0000-0000-00000000000a', 'Backwards',
             now() + interval '2 hours', now() + interval '1 hour')$$,
   '23514',
   null,
@@ -54,7 +54,7 @@ select throws_ok(
 -- not-blank CHECKs.
 select throws_ok(
   $$insert into public.events (owner_id, title, starts_at, ends_at)
-    values ('00000000-0000-0000-0000-0000000000h1', '   ',
+    values ('00000000-0000-0000-0000-00000000000a', '   ',
             now() + interval '1 hour', now() + interval '2 hours')$$,
   '23514',
   null,
@@ -63,7 +63,7 @@ select throws_ok(
 
 select throws_ok(
   $$insert into public.events (owner_id, starts_at, ends_at, notes)
-    values ('00000000-0000-0000-0000-0000000000h1',
+    values ('00000000-0000-0000-0000-00000000000a',
             now() + interval '1 hour', now() + interval '2 hours', '   ')$$,
   '23514',
   null,
@@ -72,7 +72,7 @@ select throws_ok(
 
 select throws_ok(
   $$insert into public.events (owner_id, starts_at, ends_at, location)
-    values ('00000000-0000-0000-0000-0000000000h1',
+    values ('00000000-0000-0000-0000-00000000000a',
             now() + interval '1 hour', now() + interval '2 hours', '   ')$$,
   '23514',
   null,
