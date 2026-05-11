@@ -4,6 +4,7 @@ import {
   inviteFriends,
   listEvents,
   respondToInvite,
+  uninviteFriends,
   updateEvent,
 } from '../lib/event-actions';
 import { supabase } from '../lib/supabase';
@@ -34,6 +35,7 @@ function chainable(resolved: unknown) {
     'upsert',
     'delete',
     'eq',
+    'in',
     'lt',
     'gt',
     'gte',
@@ -385,6 +387,39 @@ describe('event-actions', () => {
         inviteeIds: ['friend-a'],
       });
       expect(error).toMatch(/couldn't send invites/i);
+    });
+  });
+
+  describe('uninviteFriends', () => {
+    it('deletes event_invites rows for the given event + invitee ids', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { error } = await uninviteFriends({
+        eventId: 'ev1',
+        inviteeIds: ['friend-a', 'friend-b'],
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('event_invites');
+      expect(builder.delete).toHaveBeenCalled();
+      expect(builder.eq).toHaveBeenCalledWith('event_id', 'ev1');
+      expect(builder.in).toHaveBeenCalledWith('invitee_id', ['friend-a', 'friend-b']);
+    });
+
+    it('no-ops when the id list is empty', async () => {
+      const { error } = await uninviteFriends({ eventId: 'ev1', inviteeIds: [] });
+      expect(error).toBeNull();
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it('returns a friendly error on DB failure', async () => {
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await uninviteFriends({
+        eventId: 'ev1',
+        inviteeIds: ['friend-a'],
+      });
+      expect(error).toMatch(/couldn't remove invites/i);
     });
   });
 });

@@ -10,6 +10,7 @@ jest.mock('../lib/event-actions', () => ({
   updateEvent: jest.fn(),
   deleteEvent: jest.fn(),
   inviteFriends: jest.fn(),
+  uninviteFriends: jest.fn(),
   respondToInvite: jest.fn(),
 }));
 
@@ -262,10 +263,17 @@ describe('EventSheet', () => {
       expect(screen.getByText(/No friends to invite yet/i)).toBeOnTheScreen();
     });
 
-    it('does NOT render the picker in edit mode (defer to event-detail in H5)', () => {
-      render(<EventSheet {...baseProps} editing={existingEvent} friends={[alice]} />);
+    it('renders the picker in edit mode (H5b) with existing invitees pre-selected', () => {
+      const editingWithInvites: EventItem = {
+        ...existingEvent,
+        attendees: [{ invitee: alice, status: 'pending' }],
+      };
+      render(<EventSheet {...baseProps} editing={editingWithInvites} friends={[alice]} />);
       fireEvent.press(screen.getByTestId('event-sheet-edit'));
-      expect(screen.queryByTestId('invite-picker')).toBeNull();
+      // Picker is visible in edit mode now.
+      expect(screen.getByTestId('invite-picker')).toBeOnTheScreen();
+      // Alice was already invited → her chip starts pre-selected.
+      expect(screen.getByTestId('invite-chip-a').props.accessibilityState.checked).toBe(true);
     });
 
     it('tapping a chip toggles its selected state', () => {
@@ -327,6 +335,122 @@ describe('EventSheet', () => {
       // refetches so the new event shows up.
       await waitFor(() => expect(onSaved).toHaveBeenCalled());
       await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+  });
+
+  describe('edit-mode invite diff (H5b)', () => {
+    const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
+    const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
+    const cara = { id: 'c', display_name: 'Cara', color: '#FFE66D' };
+
+    function eventWith(attendees: { invitee: typeof alice; status: 'pending' }[]): EventItem {
+      return { ...existingEvent, attendees };
+    }
+
+    it('saving with no chip changes does NOT call invite or uninvite (no diff)', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      const mockedUninvite = jest.requireMock('../lib/event-actions').uninviteFriends as jest.Mock;
+      mockedInvite.mockClear();
+      mockedUninvite.mockClear();
+      mockedUpdate.mockResolvedValue({ error: null });
+
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventWith([{ invitee: alice, status: 'pending' }])}
+          friends={[alice, bob]}
+        />,
+      );
+      fireEvent.press(screen.getByTestId('event-sheet-edit'));
+      // Don't touch any chips — Alice stays selected, Bob stays unselected.
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedUpdate).toHaveBeenCalled());
+      // Diff is empty → no invite or uninvite call.
+      expect(mockedInvite).not.toHaveBeenCalled();
+      expect(mockedUninvite).not.toHaveBeenCalled();
+    });
+
+    it('selecting a previously-unselected chip calls inviteFriends with that id only', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      const mockedUninvite = jest.requireMock('../lib/event-actions').uninviteFriends as jest.Mock;
+      mockedInvite.mockClear();
+      mockedUninvite.mockClear();
+      mockedInvite.mockResolvedValue({ error: null });
+      mockedUpdate.mockResolvedValue({ error: null });
+
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventWith([{ invitee: alice, status: 'pending' }])}
+          friends={[alice, bob]}
+        />,
+      );
+      fireEvent.press(screen.getByTestId('event-sheet-edit'));
+      // Add Bob.
+      fireEvent.press(screen.getByTestId('invite-chip-b'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() =>
+        expect(mockedInvite).toHaveBeenCalledWith({ eventId: 'ev1', inviteeIds: ['b'] }),
+      );
+      expect(mockedUninvite).not.toHaveBeenCalled();
+    });
+
+    it('deselecting a previously-selected chip calls uninviteFriends with that id only', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      const mockedUninvite = jest.requireMock('../lib/event-actions').uninviteFriends as jest.Mock;
+      mockedInvite.mockClear();
+      mockedUninvite.mockClear();
+      mockedUninvite.mockResolvedValue({ error: null });
+      mockedUpdate.mockResolvedValue({ error: null });
+
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventWith([
+            { invitee: alice, status: 'pending' },
+            { invitee: bob, status: 'pending' },
+          ])}
+          friends={[alice, bob]}
+        />,
+      );
+      fireEvent.press(screen.getByTestId('event-sheet-edit'));
+      // Uninvite Alice.
+      fireEvent.press(screen.getByTestId('invite-chip-a'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() =>
+        expect(mockedUninvite).toHaveBeenCalledWith({ eventId: 'ev1', inviteeIds: ['a'] }),
+      );
+      expect(mockedInvite).not.toHaveBeenCalled();
+    });
+
+    it('combining add + remove fires both invite and uninvite in the same save', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      const mockedUninvite = jest.requireMock('../lib/event-actions').uninviteFriends as jest.Mock;
+      mockedInvite.mockClear();
+      mockedUninvite.mockClear();
+      mockedInvite.mockResolvedValue({ error: null });
+      mockedUninvite.mockResolvedValue({ error: null });
+      mockedUpdate.mockResolvedValue({ error: null });
+
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventWith([{ invitee: alice, status: 'pending' }])}
+          friends={[alice, bob, cara]}
+        />,
+      );
+      fireEvent.press(screen.getByTestId('event-sheet-edit'));
+      fireEvent.press(screen.getByTestId('invite-chip-a')); // remove Alice
+      fireEvent.press(screen.getByTestId('invite-chip-c')); // add Cara
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedInvite).toHaveBeenCalled());
+      await waitFor(() => expect(mockedUninvite).toHaveBeenCalled());
+      expect(mockedInvite).toHaveBeenCalledWith({ eventId: 'ev1', inviteeIds: ['c'] });
+      expect(mockedUninvite).toHaveBeenCalledWith({ eventId: 'ev1', inviteeIds: ['a'] });
     });
   });
 

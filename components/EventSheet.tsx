@@ -29,6 +29,7 @@ import {
   deleteEvent,
   inviteFriends,
   respondToInvite,
+  uninviteFriends,
   updateEvent,
 } from '../lib/event-actions';
 import type { EventInviteStatus, EventItem } from '../lib/event-helpers';
@@ -149,10 +150,18 @@ export function EventSheet({
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formMode, setFormMode] = useState<boolean>(!editing);
-  // Set of friend ids selected to invite. Only relevant in CREATE
-  // mode — edit-and-add and edit-and-remove invitees comes in H5's
-  // event-detail view. We reset this whenever the sheet opens.
+  // Set of friend ids selected to invite. In CREATE mode this starts
+  // empty; in EDIT mode (H5b) it's seeded from `editing.attendees` so
+  // existing invites show as already-selected chips, and the host can
+  // add/remove by toggling. The save handler diffs against the
+  // original set to compute add/remove batches.
   const [inviteeIds, setInviteeIds] = useState<Set<string>>(() => new Set());
+  // Snapshot of the invitee ids at the time the sheet opened — used
+  // by `runEditSave` to diff against the current selection and
+  // compute what to invite vs uninvite. Stays empty in CREATE mode.
+  const [originalInviteeIds, setOriginalInviteeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   // Default times for a NEW event: 6pm–9pm on the default date — a
   // reasonable host-side guess for "plan something with friends".
@@ -210,7 +219,16 @@ export function EventSheet({
       setStart(editing ? editing.startsAt : buildDate(defaultDate, 18, 0));
       setEnd(editing ? editing.endsAt : buildDate(defaultDate, 21, 0));
       setFormMode(!editing);
-      setInviteeIds(new Set());
+      // Seed both inviteeIds + originalInviteeIds from the editing
+      // item's attendees. In CREATE mode both are empty; in EDIT
+      // mode both reflect the current state of the world. The
+      // ORIGINAL set never changes mid-session — the diff at save
+      // time compares against this snapshot.
+      const initialInvitees = new Set<string>(
+        (editing?.attendees ?? []).map((a) => a.invitee.id),
+      );
+      setInviteeIds(initialInvitees);
+      setOriginalInviteeIds(initialInvitees);
     }
   }, [visible, editing, defaultDate]);
 
@@ -272,6 +290,36 @@ export function EventSheet({
         if (error) {
           toast.error(error);
           return;
+        }
+        // H5b: diff the picker selection against the original
+        // attendees to compute the invite + uninvite batches.
+        // Empty batches no-op via the action layer, so we can fire
+        // both unconditionally without burning a round-trip when
+        // there's nothing to send. If one succeeds and the other
+        // fails (rare — Postgres-level network blip mid-flight), we
+        // toast the failure but still report success on the event
+        // itself; the parent refetch picks up whatever DID land.
+        const toInvite: string[] = [];
+        const toUninvite: string[] = [];
+        for (const id of inviteeIds) {
+          if (!originalInviteeIds.has(id)) toInvite.push(id);
+        }
+        for (const id of originalInviteeIds) {
+          if (!inviteeIds.has(id)) toUninvite.push(id);
+        }
+        if (toInvite.length > 0) {
+          const { error: inviteError } = await inviteFriends({
+            eventId: editing.id,
+            inviteeIds: toInvite,
+          });
+          if (inviteError) toast.error(inviteError);
+        }
+        if (toUninvite.length > 0) {
+          const { error: uninviteError } = await uninviteFriends({
+            eventId: editing.id,
+            inviteeIds: toUninvite,
+          });
+          if (uninviteError) toast.error(uninviteError);
         }
       } else {
         // Create path: createEvent returns the new id, then we
@@ -627,17 +675,17 @@ export function EventSheet({
                     />
                   </View>
 
-                  {/* Invite picker (CREATE mode only — adding /
-                      removing invitees on an existing event lives in
-                      the H5 event-detail view). Renders a chip per
-                      accepted friend; tapping toggles selection. The
-                      friend list comes in via the parent — we don't
-                      fetch it here to keep this component side-
-                      effect-free. Empty state when there are no
-                      accepted friends: hints how to get there. */}
-                  {!editing ? (
-                    <View style={styles.field} testID="invite-picker">
-                      <Text style={styles.label}>Invite friends</Text>
+                  {/* Invite picker — renders in CREATE and EDIT mode
+                      (H5b). In edit mode, chips for already-invited
+                      friends start pre-selected (seeded from
+                      `editing.attendees` in the reset effect); the
+                      save handler diffs against that snapshot to
+                      compute invite + uninvite batches. Friend list
+                      comes in via the parent so the sheet stays
+                      side-effect-free. Empty state when there are
+                      no accepted friends. */}
+                  <View style={styles.field} testID="invite-picker">
+                    <Text style={styles.label}>Invite friends</Text>
                       {(friends ?? []).length === 0 ? (
                         <Text style={styles.inviteEmpty}>
                           No friends to invite yet — add some from the
@@ -694,8 +742,7 @@ export function EventSheet({
                           })}
                         </View>
                       )}
-                    </View>
-                  ) : null}
+                  </View>
                 </ScrollView>
               )}
             </KeyboardAvoidingView>
