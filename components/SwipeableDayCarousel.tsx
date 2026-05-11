@@ -1,4 +1,4 @@
-import { ReactElement, useLayoutEffect, useState } from 'react';
+import { ReactElement, useLayoutEffect, useRef, useState } from 'react';
 import { RefreshControlProps, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -91,12 +91,28 @@ export function SwipeableDayCarousel({
   // update without re-rendering the panes mid-animation).
   const [layoutDate, setLayoutDate] = useState(date);
 
+  // Set to true between "swipe-commit fires onDateChange" and "slide
+  // animation completes". While true, the useLayoutEffect below SKIPS
+  // its `translateX.value = 0` reset — without this guard, the parent
+  // re-render that follows the immediate onDateChange would cancel the
+  // in-flight withTiming animation (sharedValue assignments cancel
+  // running animations), and the slide would never play. Symptom: user
+  // releases past threshold, sheet snaps to the new day with no
+  // animation. ALSO suppresses the layoutDate sync — we deliberately
+  // leave layoutDate on the OLD date during the slide so the
+  // user-visible "next" pane keeps showing the destination day's
+  // content; only after the animation finishes do we update layoutDate
+  // and reset translateX in lockstep.
+  const isCommittingRef = useRef(false);
+
   // Re-sync layoutDate with the prop AND reset translateX in a
   // useLayoutEffect (synchronous after React commit, before paint) so
   // the same paint that shows the new layout has translateX=0 — no
   // visual jolt when the parent flips `date` from outside the carousel
-  // (e.g. user picks a date in the month grid).
+  // (e.g. user picks a date in the month grid). Skipped during the
+  // commit-animation window per the ref above.
   useLayoutEffect(() => {
+    if (isCommittingRef.current) return;
     if (layoutDate !== date) {
       setLayoutDate(date);
     }
@@ -114,10 +130,20 @@ export function SwipeableDayCarousel({
   const nextItems = itemsOnDate(items, nextDate);
 
   function commitLayout(newDate: string) {
+    // Clear the commit flag FIRST so the useLayoutEffect that fires on
+    // the setLayoutDate-driven re-render below is allowed to do its
+    // `translateX.value = 0` reset. Order matters — clearing AFTER
+    // setLayoutDate would race against React's render scheduling.
+    isCommittingRef.current = false;
     setLayoutDate(newDate);
-    // No need to reset translateX here — the useLayoutEffect above
-    // catches `date !== layoutDate` (one of them just changed) and
-    // resets it synchronously before paint.
+    // No explicit translateX reset here: the useLayoutEffect above
+    // sees `date === layoutDate` (both are newDate now), the ref is
+    // false, so it sets translateX = 0 in the same synchronous
+    // post-commit pass — same paint, no flicker.
+  }
+
+  function markCommitStart() {
+    isCommittingRef.current = true;
   }
 
   const pan = Gesture.Pan()
@@ -129,10 +155,16 @@ export function SwipeableDayCarousel({
     .onEnd((e) => {
       const threshold = screenWidth / 6;
       if (e.translationX < -threshold) {
-        // Tell the parent NOW so the week-strip highlight bumps to the
-        // next day before the slide finishes — this is what fixes the
-        // user's "waits too long to switch the highlighted day"
-        // complaint.
+        // Order matters here:
+        // 1. Mark commit-in-progress so the useLayoutEffect that runs
+        //    after the parent's onDateChange-driven re-render doesn't
+        //    cancel the withTiming below by resetting translateX = 0.
+        // 2. Tell the parent NOW so the week-strip highlight bumps
+        //    immediately (the user's "waits too long to switch the
+        //    highlighted day" complaint from a previous round).
+        // 3. Run the slide animation; on completion, commitLayout
+        //    clears the ref and updates layoutDate.
+        runOnJS(markCommitStart)();
         runOnJS(onDateChange)(nextDate);
         translateX.value = withTiming(
           -screenWidth,
@@ -142,6 +174,7 @@ export function SwipeableDayCarousel({
           },
         );
       } else if (e.translationX > threshold) {
+        runOnJS(markCommitStart)();
         runOnJS(onDateChange)(prevDate);
         translateX.value = withTiming(
           screenWidth,
