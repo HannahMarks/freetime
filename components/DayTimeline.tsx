@@ -328,7 +328,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 4,
   },
-  bannerTitle: { fontSize: 14, color: '#111' },
+  // Shrunk 14 → 13 to match the smaller block text — keeps the
+  // unavailable-day banner visually consistent with the timeline blocks.
+  bannerTitle: { fontSize: 13, color: '#111' },
   // Stronger press feedback than the previous opacity:0.6 — combines a
   // bigger opacity drop with a tiny scale-down so the tap clearly
   // "responds" before the sheet opens.
@@ -368,7 +370,11 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
   },
-  blockTitle: { fontSize: 13, fontWeight: '600', color: '#111' },
-  blockTime: { fontSize: 11, color: '#444', marginTop: 2 },
+  // Slightly smaller than before (13 → 12 / 11 → 10) so text inside an
+  // event block doesn't dominate the colored fill — at the previous
+  // size a short busy block read as "a strip of text" rather than "a
+  // colored time block with a label".
+  blockTitle: { fontSize: 12, fontWeight: '600', color: '#111' },
+  blockTime: { fontSize: 10, color: '#444', marginTop: 2 },
   blockTimeDragging: { fontWeight: '700', color: '#111' },
 });
