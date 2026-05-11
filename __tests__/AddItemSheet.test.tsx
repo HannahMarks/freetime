@@ -21,6 +21,8 @@ jest.mock('../lib/availability-actions', () => ({
   deleteUnavailableDay: jest.fn(),
   skipBusyBlockOccurrence: jest.fn(),
   skipUnavailableDayOccurrence: jest.fn(),
+  moveBusyBlockOccurrence: jest.fn(),
+  editUnavailableDayOccurrence: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -980,7 +982,7 @@ describe('AddItemSheet', () => {
       expect(screen.queryByTestId('view-recurrence')).toBeNull();
     });
 
-    it('edit form pre-fills the toggle from the existing item, and updateBusyBlock is called with the rule', async () => {
+    it('edit form pre-fills the toggle from the existing item, and updateBusyBlock is called with the rule when user picks "Entire series"', async () => {
       mockedUpdateBusy.mockResolvedValue({ error: null });
       const editing: CalendarItem = {
         kind: 'busy_block',
@@ -993,6 +995,13 @@ describe('AddItemSheet', () => {
         location: null,
         recurrenceRule: { freq: 'weekly' },
       };
+      // v7: saving a recurring occurrence shows a "this one or entire
+      // series" Alert. Mock Alert to pick "Entire series" so the
+      // existing updateBusyBlock path fires.
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const seriesBtn = (buttons ?? []).find((b) => b.text === 'Entire series');
+        seriesBtn?.onPress?.();
+      });
       render(<AddItemSheet {...baseProps} editing={editing} />);
       // Tap pencil to enter edit mode.
       fireEvent.press(screen.getByTestId('event-edit'));
@@ -1001,6 +1010,8 @@ describe('AddItemSheet', () => {
 
       await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalled());
       expect(mockedUpdateBusy.mock.calls[0][0].recurrenceRule).toEqual({ freq: 'weekly' });
+
+      alertSpy.mockRestore();
     });
 
     it('toggling off the day-of-base chip and on a different day passes byDay in the saved rule', async () => {
@@ -1078,6 +1089,14 @@ describe('AddItemSheet', () => {
         location: null,
         recurrenceRule: { freq: 'weekly' },
       };
+      // While the toggle is still ON when Save is tapped, the v7
+      // Alert appears (the recurring decision is based on
+      // `editing.recurrenceRule`, not the form's current toggle
+      // state). Pick "Entire series" so the updateBusyBlock path fires.
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const seriesBtn = (buttons ?? []).find((b) => b.text === 'Entire series');
+        seriesBtn?.onPress?.();
+      });
       render(<AddItemSheet {...baseProps} editing={editing} />);
       fireEvent.press(screen.getByTestId('event-edit'));
       fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
@@ -1085,6 +1104,79 @@ describe('AddItemSheet', () => {
 
       await waitFor(() => expect(mockedUpdateBusy).toHaveBeenCalled());
       expect(mockedUpdateBusy.mock.calls[0][0].recurrenceRule).toBeNull();
+
+      alertSpy.mockRestore();
+    });
+
+    it('saving a recurring occurrence and picking "This event only" writes a move exception with override metadata', async () => {
+      const mockedMove = jest.requireMock('../lib/availability-actions')
+        .moveBusyBlockOccurrence as jest.Mock;
+      mockedMove.mockResolvedValue({ error: null });
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 18, 14, 0),
+        endsAt: new Date(2026, 4, 18, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const thisOneBtn = (buttons ?? []).find((b) => b.text === 'This event only');
+        thisOneBtn?.onPress?.();
+      });
+
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      fireEvent.press(screen.getByTestId('event-edit'));
+      // Override the title — keep times the same. The save should
+      // write a move exception with new_start = old_start +
+      // title override.
+      fireEvent.changeText(screen.getByDisplayValue('Yoga'), 'Yoga (special)');
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedMove).toHaveBeenCalled());
+      const call = mockedMove.mock.calls[0][0];
+      expect(call.seriesId).toBe('series1');
+      expect(call.title).toBe('Yoga (special)');
+
+      alertSpy.mockRestore();
+    });
+
+    it('saving a recurring occurrence and picking "Cancel" does NOT call any save action', async () => {
+      const mockedMove = jest.requireMock('../lib/availability-actions')
+        .moveBusyBlockOccurrence as jest.Mock;
+      mockedMove.mockClear();
+      mockedUpdateBusy.mockClear();
+      const editing: CalendarItem = {
+        kind: 'busy_block',
+        id: 'series1',
+        user: me,
+        startsAt: new Date(2026, 4, 18, 14, 0),
+        endsAt: new Date(2026, 4, 18, 15, 0),
+        title: 'Yoga',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+      const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+        const cancelBtn = (buttons ?? []).find((b) => b.style === 'cancel');
+        cancelBtn?.onPress?.();
+      });
+
+      render(<AddItemSheet {...baseProps} editing={editing} />);
+      fireEvent.press(screen.getByTestId('event-edit'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      // Brief flush so any in-flight async work would surface.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockedMove).not.toHaveBeenCalled();
+      expect(mockedUpdateBusy).not.toHaveBeenCalled();
+
+      alertSpy.mockRestore();
     });
   });
 

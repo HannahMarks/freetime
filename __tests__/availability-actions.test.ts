@@ -3,6 +3,7 @@ import {
   createUnavailableDay,
   deleteBusyBlock,
   deleteUnavailableDay,
+  editUnavailableDayOccurrence,
   moveBusyBlockOccurrence,
   skipBusyBlockOccurrence,
   skipUnavailableDayOccurrence,
@@ -415,6 +416,102 @@ describe('availability-actions', () => {
         newEnd: new Date(),
       });
       expect(error).toMatch(/couldn't move/i);
+    });
+
+    it('includes override title/notes/location in the payload when provided (edit-just-this-one)', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await moveBusyBlockOccurrence({
+        seriesId: 'series1',
+        originalStart: new Date(2026, 4, 18, 14, 0),
+        newStart: new Date(2026, 4, 18, 14, 0),
+        newEnd: new Date(2026, 4, 18, 15, 0),
+        title: 'Yoga (in studio)',
+        notes: 'Bring towel',
+        location: 'Studio 7',
+      });
+
+      expect(builder.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Yoga (in studio)',
+          notes: 'Bring towel',
+          location: 'Studio 7',
+        }),
+        { onConflict: 'series_id,original_start' },
+      );
+    });
+
+    it('omits override fields from the payload when not provided (preserves any existing override)', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await moveBusyBlockOccurrence({
+        seriesId: 'series1',
+        originalStart: new Date(2026, 4, 18, 14, 0),
+        newStart: new Date(2026, 4, 18, 16, 0),
+        newEnd: new Date(2026, 4, 18, 17, 0),
+      });
+
+      const payload = builder.upsert.mock.calls[0][0];
+      expect(payload).not.toHaveProperty('title');
+      expect(payload).not.toHaveProperty('notes');
+      expect(payload).not.toHaveProperty('location');
+    });
+  });
+
+  describe('editUnavailableDayOccurrence', () => {
+    it('upserts a move exception with new_date defaulting to originalDate when newDate omitted', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await editUnavailableDayOccurrence({
+        seriesUserId: 'me-id',
+        seriesDate: '2026-05-11',
+        originalDate: '2026-05-18',
+        title: 'Sick day',
+      });
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('unavailable_day_exceptions');
+      const payload = builder.upsert.mock.calls[0][0];
+      expect(payload).toMatchObject({
+        series_user_id: 'me-id',
+        series_date: '2026-05-11',
+        original_date: '2026-05-18',
+        action: 'move',
+        new_date: '2026-05-18', // defaulted to originalDate
+        title: 'Sick day',
+      });
+      expect(builder.upsert.mock.calls[0][1]).toEqual({
+        onConflict: 'series_user_id,series_date,original_date',
+      });
+    });
+
+    it('writes newDate explicitly when caller provides one', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await editUnavailableDayOccurrence({
+        seriesUserId: 'me-id',
+        seriesDate: '2026-05-11',
+        originalDate: '2026-05-18',
+        newDate: '2026-05-19',
+      });
+
+      expect(builder.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ new_date: '2026-05-19' }),
+        expect.anything(),
+      );
+    });
+
+    it('returns a friendly error if the upsert fails', async () => {
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await editUnavailableDayOccurrence({
+        seriesUserId: 'me-id',
+        seriesDate: '2026-05-11',
+        originalDate: '2026-05-18',
+      });
+      expect(error).toMatch(/couldn't save/i);
     });
   });
 
