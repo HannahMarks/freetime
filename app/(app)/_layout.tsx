@@ -103,18 +103,7 @@ export default function AppTabsLayout() {
   const userColor = profile?.color ?? FALLBACK_TINT;
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: true,
-        // Push every tab's label slightly DOWN within its slot. The
-        // default placement had the label hugging the icon — adding a
-        // top margin gives it more breathing room without changing the
-        // tab bar's overall height. Bumped the bar height a hair so the
-        // shifted label still has room and isn't clipped.
-        tabBarStyle: { height: 60 },
-        tabBarLabelStyle: { marginTop: 6, fontSize: 11 },
-      }}
-    >
+    <Tabs screenOptions={{ headerShown: true }}>
       <Tabs.Screen
         name="calendar"
         options={{
