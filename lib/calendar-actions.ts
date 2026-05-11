@@ -225,6 +225,84 @@ export async function listCalendarItems(args: {
     }
   }
 
+  // Per-occurrence skip / move exceptions for recurring unavailable_days.
+  // Same best-effort posture as the busy_blocks side: failure here
+  // (e.g. table missing on a fresh DB) logs and proceeds with no
+  // exceptions applied. Keyed by `${user_id}|${series_date}` since
+  // the parent PK is composite (`user_id`, `date`) — a flat string
+  // map is simpler than nested Maps here.
+  const recurringDayRows = (
+    (daysResult.data ?? []) as unknown as UnavailableDayRow[]
+  ).filter((r) => isRecurrenceRule(r.recurrence_rule));
+  const daySkipKeysBySeriesKey = new Map<string, Set<string>>();
+  const dayMovesBySeriesKey = new Map<
+    string,
+    Map<string, { newStart: Date; newEnd: Date }>
+  >();
+  if (recurringDayRows.length > 0) {
+    // PostgREST supports composite-key lookups via `.or()` with one
+    // clause per series. Each clause AND's user_id + series_date.
+    // Example: `and(series_user_id.eq.<u>,series_date.eq.<d>)`.
+    const orClauses = recurringDayRows
+      .map(
+        (r) =>
+          `and(series_user_id.eq.${r.user_id},series_date.eq.${r.date})`,
+      )
+      .join(',');
+    const dayExceptionsResult = await supabase
+      .from('unavailable_day_exceptions')
+      .select('series_user_id, series_date, original_date, action, new_date')
+      .or(orClauses);
+    if (dayExceptionsResult.error) {
+      // eslint-disable-next-line no-console
+      if (process.env.NODE_ENV !== 'production') {
+        console.error(
+          '[calendar] unavailable_day exceptions load failed',
+          dayExceptionsResult.error,
+        );
+      }
+    } else {
+      for (const ex of (dayExceptionsResult.data ?? []) as Array<{
+        series_user_id: string;
+        series_date: string;
+        original_date: string;
+        action: string;
+        new_date: string | null;
+      }>) {
+        const seriesKey = `${ex.series_user_id}|${ex.series_date}`;
+        // Helper's emitted occurrence has `startsAt` at local midnight of
+        // the occurring date. Convert original_date (YYYY-MM-DD) to the
+        // same form so ISO-string comparison matches.
+        const [oy, om, od] = ex.original_date.split('-').map(Number);
+        const originalIso = new Date(oy, om - 1, od).toISOString();
+        if (ex.action === 'skip') {
+          const existing = daySkipKeysBySeriesKey.get(seriesKey);
+          if (existing) {
+            existing.add(originalIso);
+          } else {
+            daySkipKeysBySeriesKey.set(seriesKey, new Set([originalIso]));
+          }
+        } else if (ex.action === 'move' && ex.new_date) {
+          // Convert new_date to local-midnight [start, end) so the
+          // unmoved expandOccurrences interface (which expects
+          // {newStart, newEnd}) can be reused.
+          const [ny, nm, nd] = ex.new_date.split('-').map(Number);
+          const newStart = new Date(ny, nm - 1, nd);
+          const newEnd = new Date(ny, nm - 1, nd + 1);
+          const existing = dayMovesBySeriesKey.get(seriesKey);
+          if (existing) {
+            existing.set(originalIso, { newStart, newEnd });
+          } else {
+            dayMovesBySeriesKey.set(
+              seriesKey,
+              new Map([[originalIso, { newStart, newEnd }]]),
+            );
+          }
+        }
+      }
+    }
+  }
+
   for (const row of (daysResult.data ?? []) as unknown as UnavailableDayRow[]) {
     if (!row.user) continue;
     if (isRecurrenceRule(row.recurrence_rule)) {
@@ -237,17 +315,28 @@ export async function listCalendarItems(args: {
       const [by, bm, bd] = row.date.split('-').map(Number);
       const baseStart = new Date(by, bm - 1, bd);
       const baseEnd = new Date(by, bm - 1, bd + 1);
+      const seriesKey = `${row.user_id}|${row.date}`;
       const occurrences = expandOccurrences({
         rule: row.recurrence_rule,
         baseStart,
         baseEnd,
         rangeStart,
         rangeEnd,
+        skipKeys: daySkipKeysBySeriesKey.get(seriesKey),
+        movesByKey: dayMovesBySeriesKey.get(seriesKey),
       });
       for (const occ of occurrences) {
         const occDate = `${occ.startsAt.getFullYear()}-${String(
           occ.startsAt.getMonth() + 1,
         ).padStart(2, '0')}-${String(occ.startsAt.getDate()).padStart(2, '0')}`;
+        // For a moved occurrence, derive `originalDate` from
+        // `occ.originalStart` (helper emits it as local midnight of the
+        // pre-move date).
+        let originalDate: string | undefined;
+        if (occ.originalStart) {
+          const o = occ.originalStart;
+          originalDate = `${o.getFullYear()}-${String(o.getMonth() + 1).padStart(2, '0')}-${String(o.getDate()).padStart(2, '0')}`;
+        }
         items.push({
           kind: 'unavailable_day',
           user: row.user,
@@ -256,6 +345,7 @@ export async function listCalendarItems(args: {
           notes: row.notes,
           recurrenceRule: row.recurrence_rule,
           seriesDate: row.date,
+          originalDate,
         });
       }
     } else {

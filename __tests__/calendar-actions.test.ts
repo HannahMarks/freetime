@@ -548,7 +548,9 @@ describe('listCalendarItems', () => {
             ],
             error: null,
           }),
-        );
+        )
+        // 3rd mock = unavailable_day_exceptions (v6); empty = no skips.
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
 
       const { data, error } = await listCalendarItems({
         fromDate: '2026-05-11',
@@ -593,7 +595,8 @@ describe('listCalendarItems', () => {
             ],
             error: null,
           }),
-        );
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
 
       const { data } = await listCalendarItems({
         fromDate: '2026-05-11',
@@ -658,7 +661,8 @@ describe('listCalendarItems', () => {
             ],
             error: null,
           }),
-        );
+        )
+        .mockImplementationOnce(() => chainable({ data: [], error: null }));
 
       const { data } = await listCalendarItems({
         fromDate: '2026-05-11',
@@ -697,6 +701,124 @@ describe('listCalendarItems', () => {
       // The hard `date < toDate` cap stays — no need to fetch
       // future-only series.
       expect(dayBuilder.lt).toHaveBeenCalledWith('date', '2026-05-20');
+    });
+  });
+
+  describe('unavailable_day exceptions', () => {
+    it('queries unavailable_day_exceptions and skips occurrences matching a "skip" exception date', async () => {
+      // Series: Mon May 11 2026 weekly unavailable. Window: May 11 →
+      // June 1 (3 weeks) → expects May 11, 18, 25. Exception skips
+      // May 18. Result: only May 11 and May 25.
+      const exceptionsBuilder = chainable({
+        data: [
+          {
+            series_user_id: alice.id,
+            series_date: '2026-05-11',
+            original_date: '2026-05-18',
+            action: 'skip',
+          },
+        ],
+        error: null,
+      });
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-05-11',
+                title: 'Mondays off',
+                notes: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() => exceptionsBuilder);
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      expect(error).toBeNull();
+      // 3rd .from() call is the unavailable_day_exceptions query.
+      expect(mockSupabase.from).toHaveBeenNthCalledWith(3, 'unavailable_day_exceptions');
+      // Composite `in()` against (series_user_id, series_date) is
+      // expressed as a single .or() with a tuple match, or the client
+      // builds separate predicates. Either way, the query should
+      // include the right series id.
+      const dates = (data ?? [])
+        .filter((i) => i.kind === 'unavailable_day')
+        .map((i) => i.date)
+        .sort();
+      expect(dates).toEqual(['2026-05-11', '2026-05-25']);
+    });
+
+    it('does not query unavailable_day_exceptions when there are no recurring series', async () => {
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-05-13',
+                title: 'PTO',
+                notes: null,
+                recurrence_rule: null,
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        );
+
+      await listCalendarItems({ fromDate: '2026-05-13', toDate: '2026-05-14' });
+
+      // Only 2 .from() calls: busy_blocks + unavailable_days. No
+      // exceptions query for either kind (no recurring rows in
+      // either result).
+      expect(mockSupabase.from).toHaveBeenCalledTimes(2);
+    });
+
+    it('gracefully ignores an exceptions query failure (best-effort)', async () => {
+      mockSupabase.from
+        .mockImplementationOnce(() => chainable({ data: [], error: null }))
+        .mockImplementationOnce(() =>
+          chainable({
+            data: [
+              {
+                user_id: alice.id,
+                date: '2026-05-11',
+                title: 'Mondays off',
+                notes: null,
+                recurrence_rule: { freq: 'weekly' },
+                user: alice,
+              },
+            ],
+            error: null,
+          }),
+        )
+        .mockImplementationOnce(() =>
+          chainable({ data: null, error: { message: 'exceptions boom' } }),
+        );
+
+      const { data, error } = await listCalendarItems({
+        fromDate: '2026-05-11',
+        toDate: '2026-06-01',
+      });
+
+      // Calendar still renders; all 3 occurrences shown unfiltered.
+      expect(error).toBeNull();
+      const dates = (data ?? [])
+        .filter((i) => i.kind === 'unavailable_day')
+        .map((i) => i.date)
+        .sort();
+      expect(dates).toEqual(['2026-05-11', '2026-05-18', '2026-05-25']);
     });
   });
 });

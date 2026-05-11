@@ -5,6 +5,7 @@ import {
   deleteUnavailableDay,
   moveBusyBlockOccurrence,
   skipBusyBlockOccurrence,
+  skipUnavailableDayOccurrence,
   updateBusyBlock,
   updateUnavailableDay,
 } from '../lib/availability-actions';
@@ -447,6 +448,42 @@ describe('availability-actions', () => {
       const { error } = await skipBusyBlockOccurrence({
         seriesId: 'series1',
         originalStart: new Date(),
+      });
+      expect(error).toMatch(/couldn't skip/i);
+    });
+  });
+
+  describe('skipUnavailableDayOccurrence', () => {
+    it('upserts a skip exception keyed by (series_user_id, series_date, original_date) with null new_date', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { error } = await skipUnavailableDayOccurrence({
+        seriesUserId: 'me-id',
+        seriesDate: '2026-05-11',
+        originalDate: '2026-05-18',
+      });
+
+      expect(error).toBeNull();
+      expect(mockSupabase.from).toHaveBeenCalledWith('unavailable_day_exceptions');
+      expect(builder.upsert).toHaveBeenCalledWith(
+        {
+          series_user_id: 'me-id',
+          series_date: '2026-05-11',
+          original_date: '2026-05-18',
+          action: 'skip',
+          new_date: null,
+        },
+        { onConflict: 'series_user_id,series_date,original_date' },
+      );
+    });
+
+    it('returns a friendly error on DB failure', async () => {
+      mockSupabase.from.mockReturnValue(chainable({ error: { message: 'boom' } }));
+      const { error } = await skipUnavailableDayOccurrence({
+        seriesUserId: 'me-id',
+        seriesDate: '2026-05-11',
+        originalDate: '2026-05-18',
       });
       expect(error).toMatch(/couldn't skip/i);
     });

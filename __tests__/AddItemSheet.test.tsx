@@ -20,6 +20,7 @@ jest.mock('../lib/availability-actions', () => ({
   deleteBusyBlock: jest.fn(),
   deleteUnavailableDay: jest.fn(),
   skipBusyBlockOccurrence: jest.fn(),
+  skipUnavailableDayOccurrence: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -773,6 +774,78 @@ describe('AddItemSheet', () => {
           expect(mockedSkip).toHaveBeenCalledWith({
             seriesId: 'series1',
             originalStart: recurringBusy.kind === 'busy_block' ? recurringBusy.startsAt : new Date(),
+          }),
+        );
+        await waitFor(() => expect(onSaved).toHaveBeenCalled());
+        await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+        alertSpy.mockRestore();
+      });
+    });
+
+    describe('per-occurrence skip (recurring unavailable_days)', () => {
+      const recurringDay: CalendarItem = {
+        kind: 'unavailable_day',
+        user: me,
+        date: '2026-05-18', // occurrence date
+        seriesDate: '2026-05-11', // series start (PK)
+        title: 'Mondays off',
+        notes: null,
+        recurrenceRule: { freq: 'weekly' },
+      };
+
+      it('shows BOTH "Delete this occurrence" and "Delete entire series" for a recurring unavailable_day', () => {
+        render(<AddItemSheet {...baseProps} editing={recurringDay} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.getByTestId('event-menu-skip')).toBeOnTheScreen();
+        expect(screen.getByTestId('event-menu-delete')).toBeOnTheScreen();
+        expect(screen.getByText('Delete entire series')).toBeOnTheScreen();
+        expect(screen.queryByText('Delete event')).toBeNull();
+      });
+
+      it('shows ONLY "Delete event" (no skip) for a one-off unavailable_day', () => {
+        const oneOff: CalendarItem = {
+          kind: 'unavailable_day',
+          user: me,
+          date: '2026-05-13',
+          title: 'PTO',
+          notes: null,
+          recurrenceRule: null,
+          seriesDate: '2026-05-13',
+        };
+        render(<AddItemSheet {...baseProps} editing={oneOff} />);
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        expect(screen.queryByTestId('event-menu-skip')).toBeNull();
+        expect(screen.getByText('Delete event')).toBeOnTheScreen();
+      });
+
+      it('"Delete this occurrence" calls skipUnavailableDayOccurrence with seriesUserId + seriesDate + originalDate', async () => {
+        const mockedSkipDay = jest.requireMock('../lib/availability-actions')
+          .skipUnavailableDayOccurrence as jest.Mock;
+        mockedSkipDay.mockResolvedValue({ error: null });
+        const onSaved = jest.fn();
+        const onClose = jest.fn();
+        const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+          const destructive = (buttons ?? []).find((b) => b.style === 'destructive');
+          destructive?.onPress?.();
+        });
+
+        render(
+          <AddItemSheet
+            {...baseProps}
+            editing={recurringDay}
+            onSaved={onSaved}
+            onClose={onClose}
+          />,
+        );
+        fireEvent.press(screen.getByTestId('event-more-actions'));
+        fireEvent.press(screen.getByTestId('event-menu-skip'));
+
+        await waitFor(() =>
+          expect(mockedSkipDay).toHaveBeenCalledWith({
+            seriesUserId: 'me-id',
+            seriesDate: '2026-05-11',
+            originalDate: '2026-05-18',
           }),
         );
         await waitFor(() => expect(onSaved).toHaveBeenCalled());

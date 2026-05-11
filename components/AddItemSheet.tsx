@@ -28,6 +28,7 @@ import {
   deleteBusyBlock,
   deleteUnavailableDay,
   skipBusyBlockOccurrence,
+  skipUnavailableDayOccurrence,
   updateBusyBlock,
   updateUnavailableDay,
 } from '../lib/availability-actions';
@@ -508,13 +509,12 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   function handleDelete() {
     setMenuOpen(false);
     if (!editing || submitting) return;
-    // For a recurring busy_block, "Delete event" means delete the
-    // entire SERIES (the popover offers a separate "Delete this
-    // occurrence" entry that writes a skip exception instead). Make
-    // the confirmation copy clear about which one's about to happen.
-    const isRecurringBusy =
-      editing.kind === 'busy_block' && !!editing.recurrenceRule;
-    const confirmTitle = isRecurringBusy
+    // For ANY recurring item (busy_block OR unavailable_day),
+    // "Delete event" means delete the entire SERIES — the popover
+    // offers a separate "Delete this occurrence" entry that writes a
+    // skip exception instead. Make the confirmation copy clear.
+    const isRecurring = !!editing.recurrenceRule;
+    const confirmTitle = isRecurring
       ? 'Delete the entire series?'
       : 'Delete this item?';
     Alert.alert(confirmTitle, undefined, [
@@ -556,7 +556,7 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
    * follow-up. */
   function handleSkipOccurrence() {
     setMenuOpen(false);
-    if (!editing || submitting || editing.kind !== 'busy_block') return;
+    if (!editing || submitting) return;
     if (!editing.recurrenceRule) return;
     Alert.alert('Delete this occurrence?', 'The rest of the series will stay.', [
       { text: 'Cancel', style: 'cancel' },
@@ -566,10 +566,25 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
         onPress: async () => {
           setSubmitting(true);
           try {
-            const { error } = await skipBusyBlockOccurrence({
-              seriesId: editing.id,
-              originalStart: editing.startsAt,
-            });
+            // Routing: busy_block uses originalStart (timestamptz);
+            // unavailable_day uses (seriesUserId, seriesDate, originalDate)
+            // — composite PK. For occurrences that have already been
+            // MOVED, the displayed `startsAt` / `date` is the moved
+            // value; the lookup must use the PRE-move
+            // `originalStart` / `originalDate` so the exception row
+            // (or a new skip overriding an old move) lands on the
+            // right (series, original) pair.
+            const { error } =
+              editing.kind === 'busy_block'
+                ? await skipBusyBlockOccurrence({
+                    seriesId: editing.id,
+                    originalStart: editing.originalStart ?? editing.startsAt,
+                  })
+                : await skipUnavailableDayOccurrence({
+                    seriesUserId: editing.user.id,
+                    seriesDate: editing.seriesDate ?? editing.date,
+                    originalDate: editing.originalDate ?? editing.date,
+                  });
             if (error) {
               toast.error(error);
               return;
@@ -1020,13 +1035,15 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                   <Text style={styles.menuItemLabel}>Copy event</Text>
                 </Pressable>
               ) : null}
-              {editing.kind === 'busy_block' && editing.recurrenceRule ? (
-                // Recurring busy_blocks get TWO delete options: just
-                // this occurrence (writes a skip exception) or the
+              {editing.recurrenceRule ? (
+                // ANY recurring occurrence (busy_block OR unavailable_day)
+                // gets TWO delete options: just this occurrence (writes a
+                // skip exception via the kind-specific action) or the
                 // entire series (deletes the base row + cascades
                 // exceptions). Without splitting these the user has no
-                // way to surgically remove a single Wednesday from
-                // their "every Wed" yoga series.
+                // way to surgically remove a single Wednesday from their
+                // "every Wed" yoga series or a single Monday from their
+                // "Mondays off" series.
                 <Pressable
                   onPress={handleSkipOccurrence}
                   accessibilityRole="button"
@@ -1043,17 +1060,13 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 onPress={handleDelete}
                 accessibilityRole="button"
                 accessibilityLabel={
-                  editing.kind === 'busy_block' && editing.recurrenceRule
-                    ? 'Delete entire series'
-                    : 'Delete event'
+                  editing.recurrenceRule ? 'Delete entire series' : 'Delete event'
                 }
                 testID="event-menu-delete"
                 style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
               >
                 <Text style={[styles.menuItemLabel, styles.menuItemDanger]}>
-                  {editing.kind === 'busy_block' && editing.recurrenceRule
-                    ? 'Delete entire series'
-                    : 'Delete event'}
+                  {editing.recurrenceRule ? 'Delete entire series' : 'Delete event'}
                 </Text>
               </Pressable>
             </View>
