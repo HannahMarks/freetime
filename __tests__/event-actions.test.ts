@@ -39,6 +39,7 @@ function chainable(resolved: unknown) {
     'lt',
     'gt',
     'gte',
+    'or',
   ]) {
     builder[name] = jest.fn().mockReturnValue(builder);
   }
@@ -93,6 +94,10 @@ describe('event-actions', () => {
         ends_at: endsAt.toISOString(),
         notes: 'Bring drinks',
         location: 'My place',
+        // Default = one-off (no recurrence). Mirror's the busy_blocks
+        // pattern: the column is always written, defaulting to null,
+        // so an existing series can be cleared on update.
+        recurrence_rule: null,
       });
       // `.select('id').single()` is the new shape so the caller can
       // chain an inviteFriends call without re-fetching.
@@ -145,6 +150,48 @@ describe('event-actions', () => {
       expect(error).toMatch(/couldn't (?:add|create)/i);
       expect(id).toBeNull();
     });
+
+    it('persists a monthly recurrenceRule when provided', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ data: { id: 'ev-rec' }, error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await createEvent({
+        startsAt: new Date(2026, 4, 15, 18, 0),
+        endsAt: new Date(2026, 4, 15, 20, 0),
+        title: 'Monthly book club',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'monthly' },
+      });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recurrence_rule: { freq: 'monthly' },
+        }),
+      );
+    });
+
+    it('persists a yearly recurrenceRule with an until cap', async () => {
+      mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+      const builder = chainable({ data: { id: 'ev-rec' }, error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await createEvent({
+        startsAt: new Date(2026, 4, 15, 9, 0),
+        endsAt: new Date(2026, 4, 15, 10, 0),
+        title: 'Birthday',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'yearly', until: '2030-12-31' },
+      });
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recurrence_rule: { freq: 'yearly', until: '2030-12-31' },
+        }),
+      );
+    });
   });
 
   describe('updateEvent', () => {
@@ -171,6 +218,11 @@ describe('event-actions', () => {
         ends_at: endsAt.toISOString(),
         notes: null,
         location: 'My place',
+        // Default-null mirrors createEvent — calling updateEvent without
+        // a recurrenceRule clears any existing recurrence rule on the
+        // row (intentional: edit mode that doesn't expose recurrence
+        // shouldn't accidentally preserve a stale one).
+        recurrence_rule: null,
       });
       expect(builder.eq).toHaveBeenCalledWith('id', 'ev1');
     });
@@ -186,6 +238,27 @@ describe('event-actions', () => {
         location: null,
       });
       expect(error).toMatch(/couldn't update/i);
+    });
+
+    it('persists a recurrenceRule on update', async () => {
+      const builder = chainable({ error: null });
+      mockSupabase.from.mockReturnValue(builder);
+
+      await updateEvent({
+        id: 'ev1',
+        startsAt: new Date(2026, 4, 15, 18, 0),
+        endsAt: new Date(2026, 4, 15, 20, 0),
+        title: 'Monthly book club',
+        notes: null,
+        location: null,
+        recurrenceRule: { freq: 'monthly' },
+      });
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recurrence_rule: { freq: 'monthly' },
+        }),
+      );
     });
   });
 
@@ -235,9 +308,14 @@ describe('event-actions', () => {
       expect(error).toBeNull();
       expect(mockSupabase.from).toHaveBeenCalledWith('events');
       // Overlap window — same pattern as listCalendarItems for
-      // busy_blocks (.lt('starts_at', toDate) AND .gt('ends_at', fromDate)).
+      // busy_blocks: starts_at < toDate AND (ends_at > fromDate OR
+      // recurrence_rule is non-null). The OR branch lets us pull
+      // recurring series whose first occurrence is in the past so
+      // we can expand current-window occurrences client-side.
       expect(builder.lt).toHaveBeenCalledWith('starts_at', '2026-05-27');
-      expect(builder.gt).toHaveBeenCalledWith('ends_at', '2026-05-13');
+      expect(builder.or).toHaveBeenCalledWith(
+        'ends_at.gt.2026-05-13,recurrence_rule.not.is.null',
+      );
       // Select clause joins the owner profile AND the event_invites
       // child rows (with each invitee's profile).
       expect(builder.select).toHaveBeenCalledWith(expect.stringMatching(/owner.*profiles/));
@@ -319,6 +397,102 @@ describe('event-actions', () => {
       });
       expect(error).toBeNull();
       expect(data).toEqual([]);
+    });
+
+    it('expands a monthly recurring event into one item per occurrence in the window', async () => {
+      const builder = chainable({
+        data: [
+          {
+            id: 'ev-monthly',
+            owner_id: alice.id,
+            title: 'Book club',
+            starts_at: new Date(2026, 4, 15, 18, 0).toISOString(),
+            ends_at: new Date(2026, 4, 15, 20, 0).toISOString(),
+            notes: null,
+            location: null,
+            recurrence_rule: { freq: 'monthly' },
+            owner: alice,
+            invites: [],
+          },
+        ],
+        error: null,
+      });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { data, error } = await listEvents({
+        fromDate: '2026-05-01',
+        toDate: '2026-08-01',
+      });
+      expect(error).toBeNull();
+      // May 15, Jun 15, Jul 15 — three monthly occurrences.
+      expect(data).toHaveLength(3);
+      expect(data?.map((d) => d.startsAt.getMonth())).toEqual([4, 5, 6]);
+      // Every occurrence carries the same series id + the rule.
+      for (const item of data ?? []) {
+        expect(item.id).toBe('ev-monthly');
+        expect(item.recurrenceRule).toEqual({ freq: 'monthly' });
+      }
+    });
+
+    it('expands a yearly recurring event preserving month + day across years', async () => {
+      const builder = chainable({
+        data: [
+          {
+            id: 'ev-birthday',
+            owner_id: alice.id,
+            title: 'Birthday',
+            starts_at: new Date(2026, 4, 15, 18, 0).toISOString(),
+            ends_at: new Date(2026, 4, 15, 21, 0).toISOString(),
+            notes: null,
+            location: null,
+            recurrence_rule: { freq: 'yearly' },
+            owner: alice,
+            invites: [],
+          },
+        ],
+        error: null,
+      });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { data } = await listEvents({
+        fromDate: '2026-01-01',
+        toDate: '2029-01-01',
+      });
+      expect(data).toHaveLength(3);
+      expect(data?.map((d) => d.startsAt.getFullYear())).toEqual([2026, 2027, 2028]);
+      // Same month-day on every occurrence.
+      for (const item of data ?? []) {
+        expect(item.startsAt.getMonth()).toBe(4);
+        expect(item.startsAt.getDate()).toBe(15);
+      }
+    });
+
+    it('returns recurrenceRule: null on one-off events', async () => {
+      const builder = chainable({
+        data: [
+          {
+            id: 'ev-oneoff',
+            owner_id: alice.id,
+            title: 'Party',
+            starts_at: new Date(2026, 4, 20, 18, 0).toISOString(),
+            ends_at: new Date(2026, 4, 20, 22, 0).toISOString(),
+            notes: null,
+            location: null,
+            recurrence_rule: null,
+            owner: alice,
+            invites: [],
+          },
+        ],
+        error: null,
+      });
+      mockSupabase.from.mockReturnValue(builder);
+
+      const { data } = await listEvents({
+        fromDate: '2026-05-01',
+        toDate: '2026-06-01',
+      });
+      expect(data).toHaveLength(1);
+      expect(data?.[0].recurrenceRule).toBeNull();
     });
   });
 

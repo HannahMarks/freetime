@@ -4,6 +4,11 @@
 // the policy + reads `auth.uid()` for the live session.
 
 import type { EventAttendee, EventInviteStatus, EventItem } from './event-helpers';
+import {
+  type RecurrenceRule,
+  expandOccurrences,
+  isRecurrenceRule,
+} from './recurrence';
 import { supabase } from './supabase';
 
 export type ActionResult = { error: string | null };
@@ -27,6 +32,7 @@ type EventRow = {
   ends_at: string;
   notes: string | null;
   location: string | null;
+  recurrence_rule: unknown;
   owner: ProfileRow | null;
   /** PostgREST's array shape for the `invites:event_invites(...)`
    * embedded join. Each row is one (invitee, status) entry. */
@@ -40,7 +46,7 @@ type EventRow = {
  * sees rows they're allowed to (host sees all invites on own events;
  * invitee sees their own row). */
 const EVENT_SELECT =
-  'id, owner_id, title, starts_at, ends_at, notes, location, ' +
+  'id, owner_id, title, starts_at, ends_at, notes, location, recurrence_rule, ' +
   'owner:profiles!events_owner_id_fkey(id, display_name, color), ' +
   'invites:event_invites(status, invitee:profiles(id, display_name, color))';
 
@@ -68,6 +74,11 @@ export async function createEvent(args: {
   title: string | null;
   notes: string | null;
   location: string | null;
+  /** Optional recurrence rule. Undefined or null = one-off event.
+   * Non-null = repeating series; `startsAt` / `endsAt` describe the
+   * series's FIRST occurrence and `listEvents` expands the rest
+   * client-side via `expandOccurrences`. */
+  recurrenceRule?: RecurrenceRule | null;
 }): Promise<CreateEventResult> {
   const {
     data: { user },
@@ -86,6 +97,7 @@ export async function createEvent(args: {
       ends_at: args.endsAt.toISOString(),
       notes: args.notes,
       location: args.location,
+      recurrence_rule: args.recurrenceRule ?? null,
     })
     .select('id')
     .single();
@@ -101,6 +113,11 @@ export async function updateEvent(args: {
   title: string | null;
   notes: string | null;
   location: string | null;
+  /** Same semantics as on createEvent — undefined / null clears, a
+   * RecurrenceRule sets the series. Updating the series rule on an
+   * existing event causes `listEvents` to re-expand occurrences on
+   * the next fetch. */
+  recurrenceRule?: RecurrenceRule | null;
 }): Promise<ActionResult> {
   const { error } = await supabase
     .from('events')
@@ -110,6 +127,7 @@ export async function updateEvent(args: {
       ends_at: args.endsAt.toISOString(),
       notes: args.notes,
       location: args.location,
+      recurrence_rule: args.recurrenceRule ?? null,
     })
     .eq('id', args.id);
 
@@ -139,36 +157,81 @@ export async function listEvents(args: {
   fromDate: string;
   toDate: string;
 }): Promise<{ data: EventItem[] | null; error: string | null }> {
+  // Same overlap-with-recurrence-or branch as `listCalendarItems` for
+  // busy_blocks: a row is pulled if either (a) its base interval
+  // overlaps the window or (b) it's recurring (so we can expand its
+  // occurrences forward into the window even if the first occurrence
+  // was in the past).
   const result = await supabase
     .from('events')
     .select(EVENT_SELECT)
     .lt('starts_at', args.toDate)
-    .gt('ends_at', args.fromDate);
+    .or(`ends_at.gt.${args.fromDate},recurrence_rule.not.is.null`);
 
   if (result.error) return { data: null, error: describeError("Couldn't load events", result.error) };
+
+  // Parse range bounds (YYYY-MM-DD → local-midnight Date) for
+  // expandOccurrences. Same caveat as listCalendarItems re: timezone
+  // alignment between Postgres comparison (UTC midnight) and the
+  // helper bounds — acceptable for MVP.
+  const [fy, fm, fd] = args.fromDate.split('-').map(Number);
+  const [ty, tm, td] = args.toDate.split('-').map(Number);
+  const rangeStart = new Date(fy, fm - 1, fd);
+  const rangeEnd = new Date(ty, tm - 1, td);
 
   const items: EventItem[] = [];
   for (const row of (result.data ?? []) as unknown as EventRow[]) {
     if (!row.owner) continue;
-    // Build the attendees array from the embedded invites join. Rows
-    // whose invitee profile is null (race against a profile delete)
-    // are dropped defensively rather than surfacing as undefined.
+    // Attendees are series-level — every expanded occurrence gets the
+    // same attendee list (matches user expectation: invite to a
+    // recurring series → invitees show up on every occurrence).
     const attendees: EventAttendee[] = [];
     for (const inv of row.invites ?? []) {
       if (!inv.invitee) continue;
       attendees.push({ invitee: inv.invitee, status: inv.status });
     }
-    items.push({
-      kind: 'event',
-      id: row.id,
-      owner: row.owner,
-      startsAt: new Date(row.starts_at),
-      endsAt: new Date(row.ends_at),
-      title: row.title,
-      notes: row.notes,
-      location: row.location,
-      attendees,
-    });
+    const baseStart = new Date(row.starts_at);
+    const baseEnd = new Date(row.ends_at);
+
+    if (isRecurrenceRule(row.recurrence_rule)) {
+      // Recurring: emit one EventItem per occurrence. The DB row's id
+      // is carried on every occurrence; React keys that need uniqueness
+      // across siblings should combine `id` with `startsAt.getTime()`.
+      const occurrences = expandOccurrences({
+        rule: row.recurrence_rule,
+        baseStart,
+        baseEnd,
+        rangeStart,
+        rangeEnd,
+      });
+      for (const occ of occurrences) {
+        items.push({
+          kind: 'event',
+          id: row.id,
+          owner: row.owner,
+          startsAt: occ.startsAt,
+          endsAt: occ.endsAt,
+          title: row.title,
+          notes: row.notes,
+          location: row.location,
+          attendees,
+          recurrenceRule: row.recurrence_rule,
+        });
+      }
+    } else {
+      items.push({
+        kind: 'event',
+        id: row.id,
+        owner: row.owner,
+        startsAt: baseStart,
+        endsAt: baseEnd,
+        title: row.title,
+        notes: row.notes,
+        location: row.location,
+        attendees,
+        recurrenceRule: null,
+      });
+    }
   }
   return { data: items, error: null };
 }

@@ -32,10 +32,28 @@ import {
   uninviteFriends,
   updateEvent,
 } from '../lib/event-actions';
-import type { EventInviteStatus, EventItem } from '../lib/event-helpers';
+import {
+  type EventInviteStatus,
+  type EventItem,
+  summarizeEventRecurrence,
+} from '../lib/event-helpers';
+import type { RecurrenceFreq, RecurrenceRule } from '../lib/recurrence';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
+
+/** YYYY-MM-DD for a local-zone Date — used for the `until` field. */
+function toIsoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseIsoDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 
 // Same animation timings + behaviors as AddItemSheet — see comments
 // there for the rationale (scale-in instead of bounce, swipe-down
@@ -162,6 +180,15 @@ export function EventSheet({
   const [originalInviteeIds, setOriginalInviteeIds] = useState<Set<string>>(
     () => new Set(),
   );
+  // Recurrence. `repeats=false` → null rule on save (one-off). When
+  // on, the rule is built from `freq` + optional `until`. Default
+  // freq is 'weekly' so flipping the toggle on without picking a
+  // chip produces a sensible rule (matches the AddItemSheet pattern).
+  // Events don't expose byDay chips — keep the event UI simpler than
+  // the busy UI; "every week on this day" is the implicit pattern.
+  const [repeats, setRepeats] = useState<boolean>(false);
+  const [freq, setFreq] = useState<RecurrenceFreq>('weekly');
+  const [until, setUntil] = useState<string | null>(null);
 
   // Default times for a NEW event: 6pm–9pm on the default date — a
   // reasonable host-side guess for "plan something with friends".
@@ -229,8 +256,24 @@ export function EventSheet({
       );
       setInviteeIds(initialInvitees);
       setOriginalInviteeIds(initialInvitees);
+      // Pre-fill recurrence state from the editing event. null /
+      // missing rule = one-off (toggle off, default to weekly so
+      // turning the toggle ON later produces a usable rule).
+      const editingRule = editing?.recurrenceRule ?? null;
+      setRepeats(editingRule != null);
+      setFreq(editingRule?.freq ?? 'weekly');
+      setUntil(editingRule?.until ?? null);
     }
   }, [visible, editing, defaultDate]);
+
+  /** Build the RecurrenceRule to persist based on the current
+   * toggle + freq + until state, or null when the toggle is off. */
+  function buildRecurrenceRule(): RecurrenceRule | null {
+    if (!repeats) return null;
+    const rule: RecurrenceRule = { freq };
+    if (until) rule.until = until;
+    return rule;
+  }
 
   // Swipe-down dismiss — same gesture pattern as AddItemSheet (see
   // comments there for the activation-offset trick + continuous
@@ -278,6 +321,7 @@ export function EventSheet({
         toast.error('End time must be after start time.');
         return;
       }
+      const recurrenceRule = buildRecurrenceRule();
       if (editing) {
         const { error } = await updateEvent({
           id: editing.id,
@@ -286,6 +330,7 @@ export function EventSheet({
           title: trimmedTitle,
           notes: trimmedNotes,
           location: trimmedLocation,
+          recurrenceRule,
         });
         if (error) {
           toast.error(error);
@@ -334,6 +379,7 @@ export function EventSheet({
           title: trimmedTitle,
           notes: trimmedNotes,
           location: trimmedLocation,
+          recurrenceRule,
         });
         if (error || !id) {
           toast.error(error ?? "Couldn't create event. Please try again.");
@@ -534,6 +580,24 @@ export function EventSheet({
                       <Text style={styles.viewValue} testID="view-notes">{editing.notes}</Text>
                     </View>
                   ) : null}
+                  {editing?.recurrenceRule ? (
+                    <View style={styles.viewRow}>
+                      <Text style={styles.viewLabel}>Repeats</Text>
+                      <Text style={styles.viewValue} testID="view-recurrence">
+                        {summarizeEventRecurrence(
+                          editing.recurrenceRule,
+                          // For an expanded occurrence, `startsAt`
+                          // varies per occurrence — the summary should
+                          // be anchored on a consistent base. Use the
+                          // occurrence's startsAt; for weekly + yearly
+                          // that produces the right label per-day.
+                          // (Monthly/yearly "on the 15th" reads the
+                          // same regardless of which occurrence.)
+                          editing.startsAt,
+                        )}
+                      </Text>
+                    </View>
+                  ) : null}
                   {editing?.attendees && editing.attendees.length > 0 ? (
                     <View style={styles.viewRow}>
                       <Text style={styles.viewLabel}>Invited</Text>
@@ -674,6 +738,133 @@ export function EventSheet({
                       textAlignVertical="top"
                     />
                   </View>
+
+                  {/* Recurrence. Hand-rolled mini-switch (not RN's
+                      Switch) matches the AddItemSheet visual. Toggle
+                      OFF → null rule on save (one-off). Toggle ON →
+                      pick a Frequency chip; optionally an Ends-on-a-
+                      date sub-toggle to add an `until` cap.
+                      Unlike AddItemSheet, EventSheet skips weekly
+                      byDay chips — events recur on the base's day. */}
+                  <Pressable
+                    onPress={() => setRepeats((v) => !v)}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: repeats }}
+                    accessibilityLabel="Repeat event"
+                    testID="event-repeat-toggle"
+                    style={({ pressed }) => [
+                      styles.repeatRow,
+                      pressed && styles.repeatRowPressed,
+                    ]}
+                  >
+                    <Text style={styles.repeatLabel}>Repeats</Text>
+                    <View
+                      style={[
+                        styles.repeatSwitch,
+                        repeats && styles.repeatSwitchOn,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.repeatSwitchKnob,
+                          repeats && styles.repeatSwitchKnobOn,
+                        ]}
+                      />
+                    </View>
+                  </Pressable>
+
+                  {repeats ? (
+                    <>
+                      <View style={styles.freqRow}>
+                        {(['weekly', 'monthly', 'yearly'] as const).map((f) => {
+                          const selected = freq === f;
+                          return (
+                            <Pressable
+                              key={f}
+                              onPress={() => setFreq(f)}
+                              accessibilityRole="radio"
+                              accessibilityState={{ checked: selected }}
+                              accessibilityLabel={`Repeat ${f}`}
+                              testID={`event-freq-${f}`}
+                              style={[
+                                styles.freqChip,
+                                selected && styles.freqChipSelected,
+                              ]}
+                            >
+                              <Text
+                                style={
+                                  selected
+                                    ? styles.freqChipLabelSelected
+                                    : styles.freqChipLabel
+                                }
+                              >
+                                {f === 'weekly'
+                                  ? 'Weekly'
+                                  : f === 'monthly'
+                                    ? 'Monthly'
+                                    : 'Yearly'}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+
+                      <Pressable
+                        onPress={() => {
+                          if (until) {
+                            setUntil(null);
+                          } else {
+                            // Seed a reasonable default: 1 unit of
+                            // the freq past the start. For weekly,
+                            // that's +3 months (covers ~13 weekly
+                            // occurrences) so the default cap feels
+                            // useful; for monthly/yearly, +1 year.
+                            const def = new Date(start);
+                            if (freq === 'weekly') {
+                              def.setMonth(def.getMonth() + 3);
+                            } else {
+                              def.setFullYear(def.getFullYear() + 1);
+                            }
+                            setUntil(toIsoDate(def));
+                          }
+                        }}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: until != null }}
+                        accessibilityLabel="Set an end date"
+                        testID="event-until-toggle"
+                        style={({ pressed }) => [
+                          styles.repeatRow,
+                          pressed && styles.repeatRowPressed,
+                        ]}
+                      >
+                        <Text style={styles.repeatLabel}>Ends on a date</Text>
+                        <View
+                          style={[
+                            styles.repeatSwitch,
+                            until != null && styles.repeatSwitchOn,
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.repeatSwitchKnob,
+                              until != null && styles.repeatSwitchKnobOn,
+                            ]}
+                          />
+                        </View>
+                      </Pressable>
+
+                      {until ? (
+                        <View style={styles.untilRow}>
+                          <Text style={styles.label}>Ends</Text>
+                          <DatePicker
+                            testID="event-until-picker"
+                            value={parseIsoDate(until)}
+                            onChange={(picked) => setUntil(toIsoDate(picked))}
+                          />
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null}
 
                   {/* Invite picker — renders in CREATE and EDIT mode
                       (H5b). In edit mode, chips for already-invited
@@ -896,6 +1087,61 @@ const styles = StyleSheet.create({
   inviteChipLabel: { fontSize: 13, color: '#444' },
   inviteChipLabelSelected: { fontSize: 13, color: '#111', fontWeight: '600' },
   inviteEmpty: { fontSize: 13, color: '#888', lineHeight: 18 },
+  // Recurrence section. Visual parity with AddItemSheet's
+  // recurrence widgets (`repeatRow` + `repeatSwitch` look) so the
+  // toggle reads the same across the two sheets, but the values
+  // are duplicated locally to keep EventSheet free of cross-sheet
+  // style imports.
+  repeatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  repeatRowPressed: { opacity: 0.6 },
+  repeatLabel: { fontSize: 14, color: '#222' },
+  repeatSwitch: {
+    width: 38,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ddd',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  repeatSwitchOn: { backgroundColor: '#111' },
+  repeatSwitchKnob: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#fff',
+  },
+  repeatSwitchKnobOn: { transform: [{ translateX: 16 }] },
+  freqRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  freqChip: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+  },
+  freqChipSelected: {
+    borderColor: '#111',
+    backgroundColor: '#111',
+  },
+  freqChipLabel: { fontSize: 13, color: '#444' },
+  freqChipLabelSelected: { fontSize: 13, color: '#fff', fontWeight: '600' },
+  untilRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 4,
+  },
   // Invitee RSVP pills. Three side-by-side rounded buttons; the
   // currently-selected one fills (dark bg + white text) for an
   // unambiguous "this is my RSVP" affordance.
