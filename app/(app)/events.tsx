@@ -16,9 +16,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { EventSheet } from '../../components/EventSheet';
 import { useAuth } from '../../lib/auth';
-import { formatTimeRange, isoDate } from '../../lib/calendar-helpers';
+import {
+  type FriendProfile,
+  formatTimeRange,
+  isoDate,
+} from '../../lib/calendar-helpers';
 import { listEvents } from '../../lib/event-actions';
 import type { EventItem } from '../../lib/event-helpers';
+import { listFriendships } from '../../lib/friend-actions';
 import { toast } from '../../lib/toast';
 
 const FAB_BG_FALLBACK = '#111';
@@ -48,8 +53,14 @@ function formatEventLine(item: EventItem, today: Date): string {
 }
 
 export default function EventsScreen() {
-  const { profile } = useAuth();
+  const { session, profile } = useAuth();
   const [items, setItems] = useState<EventItem[]>([]);
+  // Friends list — accepted-only — used by the EventSheet's invite
+  // picker. Fetched once on mount; the picker just renders whatever
+  // we hand it. (No refetch on pull-to-refresh — friends churn slowly
+  // enough that a stale list is acceptable; a session/app reload
+  // refreshes it.)
+  const [friends, setFriends] = useState<FriendProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -74,16 +85,28 @@ export default function EventsScreen() {
     }
   }, []);
 
+  const fetchFriends = useCallback(async () => {
+    if (!session?.user.id) return;
+    const { data, error } = await listFriendships(session.user.id);
+    if (error) {
+      // Don't toast — friends are a secondary concern for this screen
+      // (events list still works without them; the picker just shows
+      // its empty state).
+      return;
+    }
+    if (data) setFriends(data.friends.map((f) => f.friend));
+  }, [session?.user.id]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchEvents().finally(() => {
+    Promise.all([fetchEvents(), fetchFriends()]).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [fetchEvents]);
+  }, [fetchEvents, fetchFriends]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -184,6 +207,7 @@ export default function EventsScreen() {
         visible={sheetOpen}
         defaultDate={todayIso}
         editing={editing}
+        friends={friends}
         onClose={() => setSheetOpen(false)}
         onSaved={() => {
           // Refetch on any successful save / delete so the list

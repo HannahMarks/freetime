@@ -9,6 +9,7 @@ jest.mock('../lib/event-actions', () => ({
   createEvent: jest.fn(),
   updateEvent: jest.fn(),
   deleteEvent: jest.fn(),
+  inviteFriends: jest.fn(),
 }));
 
 jest.mock('../lib/toast', () => ({
@@ -93,7 +94,7 @@ describe('EventSheet', () => {
     });
 
     it('calls createEvent with the form values on Save', async () => {
-      mockedCreate.mockResolvedValue({ error: null });
+      mockedCreate.mockResolvedValue({ id: 'ev-new', error: null });
       render(<EventSheet {...baseProps} />);
       fireEvent.changeText(screen.getByPlaceholderText('Title (optional)'), 'Birthday party');
       fireEvent.changeText(screen.getByTestId('input-location'), 'My place');
@@ -123,7 +124,7 @@ describe('EventSheet', () => {
     });
 
     it('toasts and stays open on a DB error', async () => {
-      mockedCreate.mockResolvedValue({ error: "Couldn't create event. Please try again." });
+      mockedCreate.mockResolvedValue({ id: null, error: "Couldn't create event. Please try again." });
       const onSaved = jest.fn();
       const onClose = jest.fn();
       render(<EventSheet {...baseProps} onSaved={onSaved} onClose={onClose} />);
@@ -240,5 +241,123 @@ describe('EventSheet', () => {
     expect(dates['date-picker-start']?.value?.getDate()).toBe(20);
     expect(dates['date-picker-end']?.value?.getDate()).toBe(20);
     expect(dates['date-picker-start']?.value?.getMonth()).toBe(4); // May
+  });
+
+  describe('invite picker (create mode)', () => {
+    const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
+    const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
+
+    it('renders one chip per accepted friend in create mode', () => {
+      render(<EventSheet {...baseProps} friends={[alice, bob]} />);
+      expect(screen.getByTestId('invite-picker')).toBeOnTheScreen();
+      expect(screen.getByTestId('invite-chip-a')).toBeOnTheScreen();
+      expect(screen.getByTestId('invite-chip-b')).toBeOnTheScreen();
+      // Chip starts unchecked.
+      expect(screen.getByTestId('invite-chip-a').props.accessibilityState.checked).toBe(false);
+    });
+
+    it('shows the empty-state copy when the user has no accepted friends', () => {
+      render(<EventSheet {...baseProps} friends={[]} />);
+      expect(screen.getByText(/No friends to invite yet/i)).toBeOnTheScreen();
+    });
+
+    it('does NOT render the picker in edit mode (defer to event-detail in H5)', () => {
+      render(<EventSheet {...baseProps} editing={existingEvent} friends={[alice]} />);
+      fireEvent.press(screen.getByTestId('event-sheet-edit'));
+      expect(screen.queryByTestId('invite-picker')).toBeNull();
+    });
+
+    it('tapping a chip toggles its selected state', () => {
+      render(<EventSheet {...baseProps} friends={[alice]} />);
+      const chip = screen.getByTestId('invite-chip-a');
+      expect(chip.props.accessibilityState.checked).toBe(false);
+      fireEvent.press(chip);
+      expect(screen.getByTestId('invite-chip-a').props.accessibilityState.checked).toBe(true);
+      // Toggle off again.
+      fireEvent.press(screen.getByTestId('invite-chip-a'));
+      expect(screen.getByTestId('invite-chip-a').props.accessibilityState.checked).toBe(false);
+    });
+
+    it('on Save: createEvent → inviteFriends with the selected ids', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      mockedCreate.mockResolvedValue({ id: 'ev-new', error: null });
+      mockedInvite.mockResolvedValue({ error: null });
+
+      render(<EventSheet {...baseProps} friends={[alice, bob]} />);
+      fireEvent.press(screen.getByTestId('invite-chip-a'));
+      fireEvent.press(screen.getByTestId('invite-chip-b'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      await waitFor(() => expect(mockedInvite).toHaveBeenCalled());
+      // inviteFriends gets called with the new event id + the
+      // selected friend ids in insertion order.
+      const inviteCall = mockedInvite.mock.calls[0][0];
+      expect(inviteCall.eventId).toBe('ev-new');
+      expect(inviteCall.inviteeIds.sort()).toEqual(['a', 'b']);
+    });
+
+    it('skips the inviteFriends call when no one is selected', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      mockedInvite.mockClear();
+      mockedCreate.mockResolvedValue({ id: 'ev-new', error: null });
+
+      render(<EventSheet {...baseProps} friends={[alice]} />);
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      // No invites picked → no inviteFriends call.
+      expect(mockedInvite).not.toHaveBeenCalled();
+    });
+
+    it('toasts on invite failure but still closes the sheet (event was created)', async () => {
+      const mockedInvite = jest.requireMock('../lib/event-actions').inviteFriends as jest.Mock;
+      mockedCreate.mockResolvedValue({ id: 'ev-new', error: null });
+      mockedInvite.mockResolvedValue({ error: "Couldn't send invites. Please try again." });
+      const onClose = jest.fn();
+      const onSaved = jest.fn();
+
+      render(<EventSheet {...baseProps} friends={[alice]} onClose={onClose} onSaved={onSaved} />);
+      fireEvent.press(screen.getByTestId('invite-chip-a'));
+      fireEvent.press(screen.getByLabelText('Save'));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/send invites/i)));
+      // Event creation succeeded — sheet still closes + parent
+      // refetches so the new event shows up.
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+  });
+
+  describe('attendees in view mode', () => {
+    const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
+    const cara = { id: 'c', display_name: 'Cara', color: '#FFE66D' };
+
+    it('renders the Invited row with names + non-pending status suffixes', () => {
+      const editingWithInvites: EventItem = {
+        ...existingEvent,
+        attendees: [
+          { invitee: bob, status: 'accepted' },
+          { invitee: cara, status: 'pending' },
+        ],
+      };
+      render(<EventSheet {...baseProps} editing={editingWithInvites} />);
+      const text = screen.getByTestId('view-attendees').props.children as string;
+      // Accepted → suffix shown; pending → bare name (default state).
+      expect(text).toMatch(/Bob \(accepted\)/);
+      expect(text).toMatch(/Cara/);
+      expect(text).not.toMatch(/Cara \(/); // pending = no suffix
+    });
+
+    it('omits the Invited row when attendees is empty or missing', () => {
+      const { rerender } = render(
+        <EventSheet {...baseProps} editing={{ ...existingEvent, attendees: [] }} />,
+      );
+      expect(screen.queryByTestId('view-attendees')).toBeNull();
+      // attendees missing entirely.
+      const { attendees: _drop, ...withoutAttendees } = existingEvent;
+      rerender(<EventSheet {...baseProps} editing={withoutAttendees} />);
+      expect(screen.queryByTestId('view-attendees')).toBeNull();
+    });
   });
 });

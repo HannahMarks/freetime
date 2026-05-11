@@ -5,19 +5,33 @@
 
 import type { FriendProfile } from './calendar-helpers';
 
+/** v3 of the events shape (H4): rsvp/status enum mirrors the
+ * `event_invite_status` Postgres enum from migration #60. */
+export type EventInviteStatus = 'pending' | 'accepted' | 'declined' | 'maybe';
+
+/** One attendee row attached to an `EventItem.attendees` list — the
+ * invitee's profile + their current RSVP. The host themselves are NOT
+ * surfaced as an attendee (they implicitly attend their own event;
+ * the no-self-invite trigger on `event_invites` prevents the DB from
+ * holding such a row anyway). */
+export type EventAttendee = {
+  invitee: FriendProfile;
+  status: EventInviteStatus;
+};
+
 /**
  * An event — a host-organized gathering with a time, a place, an
- * optional title/notes, and (in a follow-up PR) a list of invited
+ * optional title/notes, and (since H4) an optional list of invited
  * friends with RSVPs.
  *
  * Mirrors `BusyBlockItem`'s shape for the host-side fields. `owner`
  * is the host's profile (joined in via the `event-actions.ts` query),
  * not an arbitrary user.
  *
- * The `attendees` field is intentionally absent in this initial
- * Phase-2 PR — it'll be added when `event_invites` lands. Until then,
- * an EventItem is just "host's plan for a future activity I might
- * invite people to."
+ * `attendees` is optional in the type so existing test fixtures and
+ * any code path that doesn't need RSVPs can omit it. Production
+ * builders (`listEvents`) always populate it (empty array when there
+ * are no invites yet).
  */
 export type EventItem = {
   kind: 'event';
@@ -28,4 +42,5 @@ export type EventItem = {
   title: string | null;
   notes: string | null;
   location: string | null;
+  attendees?: EventAttendee[];
 };

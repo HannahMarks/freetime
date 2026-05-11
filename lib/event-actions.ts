@@ -1,10 +1,9 @@
-// Action layer for the `events` table — mirrors the shape of
-// `availability-actions.ts` (createBusyBlock / updateBusyBlock /
-// deleteBusyBlock + a listing query). RLS enforces ownership; this
-// file just trusts the policy + reads `auth.uid()` for the live
-// session.
+// Action layer for the `events` + `event_invites` tables — mirrors
+// the shape of `availability-actions.ts` (create / update / delete
+// + a listing query). RLS enforces ownership; this file just trusts
+// the policy + reads `auth.uid()` for the live session.
 
-import type { EventItem } from './event-helpers';
+import type { EventAttendee, EventInviteStatus, EventItem } from './event-helpers';
 import { supabase } from './supabase';
 
 export type ActionResult = { error: string | null };
@@ -13,6 +12,11 @@ type ProfileRow = {
   id: string;
   display_name: string;
   color: string;
+};
+
+type InviteRow = {
+  invitee: ProfileRow | null;
+  status: EventInviteStatus;
 };
 
 type EventRow = {
@@ -24,13 +28,21 @@ type EventRow = {
   notes: string | null;
   location: string | null;
   owner: ProfileRow | null;
+  /** PostgREST's array shape for the `invites:event_invites(...)`
+   * embedded join. Each row is one (invitee, status) entry. */
+  invites: InviteRow[] | null;
 };
 
-/** Select clause for `events` rows including the owner profile join.
- * Mirrors `BUSY_SELECT` in `calendar-actions.ts` so the UI can render
- * the host's avatar/name without a follow-up fetch. */
+/** Select clause for `events` rows including the owner profile join
+ * AND the embedded `event_invites` array with each invitee's
+ * profile. The `invites:event_invites(...)` syntax PostgREST-joins
+ * the child table; RLS on `event_invites` ensures the caller only
+ * sees rows they're allowed to (host sees all invites on own events;
+ * invitee sees their own row). */
 const EVENT_SELECT =
-  'id, owner_id, title, starts_at, ends_at, notes, location, owner:profiles(id, display_name, color)';
+  'id, owner_id, title, starts_at, ends_at, notes, location, ' +
+  'owner:profiles!events_owner_id_fkey(id, display_name, color), ' +
+  'invites:event_invites(status, invitee:profiles(id, display_name, color))';
 
 function describeError(prefix: string, err: unknown): string {
   if (process.env.NODE_ENV !== 'production') {
@@ -45,29 +57,41 @@ function describeError(prefix: string, err: unknown): string {
  * auth.uid()` so we read the user from the live session instead of
  * trusting a caller-supplied id (same pattern as `createBusyBlock`).
  */
+/** v2 (H4): return shape now carries the inserted `id` so the UI can
+ * chain a follow-up `inviteFriends` call without re-fetching the
+ * events list. `error` semantics unchanged. */
+export type CreateEventResult = { id: string | null; error: string | null };
+
 export async function createEvent(args: {
   startsAt: Date;
   endsAt: Date;
   title: string | null;
   notes: string | null;
   location: string | null;
-}): Promise<ActionResult> {
+}): Promise<CreateEventResult> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: 'Not signed in.' };
+  if (!user) return { id: null, error: 'Not signed in.' };
 
-  const { error } = await supabase.from('events').insert({
-    owner_id: user.id,
-    title: args.title,
-    starts_at: args.startsAt.toISOString(),
-    ends_at: args.endsAt.toISOString(),
-    notes: args.notes,
-    location: args.location,
-  });
+  // `.select('id').single()` instructs PostgREST to return the
+  // inserted row's id so the caller can plumb it into the invites
+  // step. Otherwise insert returns no body and we'd have to re-fetch.
+  const { data, error } = await supabase
+    .from('events')
+    .insert({
+      owner_id: user.id,
+      title: args.title,
+      starts_at: args.startsAt.toISOString(),
+      ends_at: args.endsAt.toISOString(),
+      notes: args.notes,
+      location: args.location,
+    })
+    .select('id')
+    .single();
 
-  if (error) return { error: describeError("Couldn't create event", error) };
-  return { error: null };
+  if (error) return { id: null, error: describeError("Couldn't create event", error) };
+  return { id: (data as { id: string }).id, error: null };
 }
 
 export async function updateEvent(args: {
@@ -126,6 +150,14 @@ export async function listEvents(args: {
   const items: EventItem[] = [];
   for (const row of (result.data ?? []) as unknown as EventRow[]) {
     if (!row.owner) continue;
+    // Build the attendees array from the embedded invites join. Rows
+    // whose invitee profile is null (race against a profile delete)
+    // are dropped defensively rather than surfacing as undefined.
+    const attendees: EventAttendee[] = [];
+    for (const inv of row.invites ?? []) {
+      if (!inv.invitee) continue;
+      attendees.push({ invitee: inv.invitee, status: inv.status });
+    }
     items.push({
       kind: 'event',
       id: row.id,
@@ -135,7 +167,38 @@ export async function listEvents(args: {
       title: row.title,
       notes: row.notes,
       location: row.location,
+      attendees,
     });
   }
   return { data: items, error: null };
+}
+
+/**
+ * Insert one `event_invites` row per id in `inviteeIds` for the given
+ * event. The host (caller) is enforced by RLS — the policy only lets
+ * `INSERT` succeed if `auth.uid()` owns the parent event. Status
+ * defaults to `'pending'` (also enforced by the RLS WITH CHECK).
+ *
+ * Idempotent semantics: duplicate `(event_id, invitee_id)` pairs are
+ * silently dropped by Supabase's `ignoreDuplicates` upsert mode, so
+ * re-clicking Save after a partial network failure won't tally
+ * "already invited" errors. Self-invite trigger violations still
+ * surface as errors (the host UI prevents this from being a normal
+ * code path, but we don't want to silently swallow them).
+ */
+export async function inviteFriends(args: {
+  eventId: string;
+  inviteeIds: string[];
+}): Promise<ActionResult> {
+  if (args.inviteeIds.length === 0) return { error: null };
+  const rows = args.inviteeIds.map((invitee_id) => ({
+    event_id: args.eventId,
+    invitee_id,
+  }));
+  const { error } = await supabase.from('event_invites').upsert(rows, {
+    onConflict: 'event_id,invitee_id',
+    ignoreDuplicates: true,
+  });
+  if (error) return { error: describeError("Couldn't send invites", error) };
+  return { error: null };
 }
