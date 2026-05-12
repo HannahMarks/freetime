@@ -1,4 +1,9 @@
-import { listEventMedia, uploadEventPhoto } from '../lib/event-media-actions';
+import {
+  deleteEventMedia,
+  listEventMedia,
+  signEventMediaUrls,
+  uploadEventPhoto,
+} from '../lib/event-media-actions';
 import { supabase } from '../lib/supabase';
 
 jest.mock('../lib/supabase', () => ({
@@ -68,10 +73,15 @@ function chainable(resolved: unknown) {
 /** Builder for `supabase.storage.from(bucket)` returning upload /
  * remove jest mocks. Each call is independent — tests check call
  * args directly. */
-function storageBucket(uploadResult: unknown, removeResult: unknown = { error: null }) {
+function storageBucket(
+  uploadResult: unknown,
+  removeResult: unknown = { error: null },
+  signResult: unknown = { data: [], error: null },
+) {
   return {
     upload: jest.fn().mockResolvedValue(uploadResult),
     remove: jest.fn().mockResolvedValue(removeResult),
+    createSignedUrls: jest.fn().mockResolvedValue(signResult),
   };
 }
 
@@ -209,5 +219,122 @@ describe('uploadEventPhoto', () => {
     const removePathList = bucket.remove.mock.calls[0][0] as string[];
     expect(removePathList).toHaveLength(1);
     expect(removePathList[0].startsWith('ev1/me-id/')).toBe(true);
+  });
+});
+
+describe('signEventMediaUrls', () => {
+  it('returns an empty Map without hitting Storage when given no paths', async () => {
+    const bucket = storageBucket({ error: null });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+    const { data, error } = await signEventMediaUrls({ paths: [] });
+    expect(error).toBeNull();
+    expect(data).toBeInstanceOf(Map);
+    expect(data!.size).toBe(0);
+    // Early-bail: no Storage round-trip for an empty input.
+    expect(bucket.createSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it('builds path → signedUrl Map from createSignedUrls response', async () => {
+    const bucket = storageBucket({ error: null }, { error: null }, {
+      data: [
+        { path: 'ev1/me/a.jpg', signedUrl: 'https://signed/a', error: null },
+        { path: 'ev1/me/b.jpg', signedUrl: 'https://signed/b', error: null },
+      ],
+      error: null,
+    });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+
+    const { data, error } = await signEventMediaUrls({
+      paths: ['ev1/me/a.jpg', 'ev1/me/b.jpg'],
+    });
+    expect(error).toBeNull();
+    // createSignedUrls receives the full path list + a positive TTL.
+    expect(bucket.createSignedUrls).toHaveBeenCalledWith(
+      ['ev1/me/a.jpg', 'ev1/me/b.jpg'],
+      expect.any(Number),
+    );
+    expect(bucket.createSignedUrls.mock.calls[0][1]).toBeGreaterThan(0);
+    expect(data!.get('ev1/me/a.jpg')).toBe('https://signed/a');
+    expect(data!.get('ev1/me/b.jpg')).toBe('https://signed/b');
+  });
+
+  it('skips rows whose per-path signing errored (partial result is still useful)', async () => {
+    const bucket = storageBucket({ error: null }, { error: null }, {
+      data: [
+        { path: 'ev1/me/a.jpg', signedUrl: 'https://signed/a', error: null },
+        // One of the paths errored — UI can still render the other.
+        { path: 'ev1/me/bad.jpg', signedUrl: null, error: 'NotFound' },
+      ],
+      error: null,
+    });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+    const { data } = await signEventMediaUrls({
+      paths: ['ev1/me/a.jpg', 'ev1/me/bad.jpg'],
+    });
+    expect(data!.size).toBe(1);
+    expect(data!.has('ev1/me/a.jpg')).toBe(true);
+    expect(data!.has('ev1/me/bad.jpg')).toBe(false);
+  });
+
+  it('returns a friendly error on a top-level Storage failure', async () => {
+    const bucket = storageBucket({ error: null }, { error: null }, {
+      data: null,
+      error: { message: 'storage boom' },
+    });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+    const { data, error } = await signEventMediaUrls({
+      paths: ['ev1/me/a.jpg'],
+    });
+    expect(data).toBeNull();
+    expect(error).toMatch(/couldn't load/i);
+  });
+});
+
+describe('deleteEventMedia', () => {
+  it('removes the storage object FIRST then deletes the metadata row', async () => {
+    const bucket = storageBucket({ error: null });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+    const deleteBuilder = chainable({ error: null });
+    mockSupabase.from.mockReturnValue(deleteBuilder);
+
+    const { error } = await deleteEventMedia({
+      id: 'm1',
+      storagePath: 'ev1/me/a.jpg',
+    });
+    expect(error).toBeNull();
+    // Storage gone first — guards against a missing-bytes row.
+    expect(bucket.remove).toHaveBeenCalledWith(['ev1/me/a.jpg']);
+    expect(mockSupabase.from).toHaveBeenCalledWith('event_media');
+    expect(deleteBuilder.delete).toHaveBeenCalled();
+    expect(deleteBuilder.eq).toHaveBeenCalledWith('id', 'm1');
+  });
+
+  it('aborts and toasts when the storage remove fails (metadata stays intact)', async () => {
+    const bucket = storageBucket({ error: null }, { error: { message: 'storage boom' } });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+
+    const { error } = await deleteEventMedia({
+      id: 'm1',
+      storagePath: 'ev1/me/a.jpg',
+    });
+    expect(error).toMatch(/couldn't delete/i);
+    // The metadata delete is NOT attempted — leaving a missing-bytes
+    // row would be worse than the user just retrying.
+    expect(mockSupabase.from).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the metadata delete error after the storage object is already gone', async () => {
+    const bucket = storageBucket({ error: null });
+    mockSupabase.storage.from.mockReturnValue(bucket);
+    mockSupabase.from.mockReturnValue(
+      chainable({ error: { message: 'delete row boom' } }),
+    );
+
+    const { error } = await deleteEventMedia({
+      id: 'm1',
+      storagePath: 'ev1/me/a.jpg',
+    });
+    expect(error).toMatch(/couldn't delete/i);
+    expect(bucket.remove).toHaveBeenCalled();
   });
 });

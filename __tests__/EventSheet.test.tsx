@@ -14,12 +14,31 @@ jest.mock('../lib/event-actions', () => ({
   respondToInvite: jest.fn(),
 }));
 
-// Phase 3 P2a: EventSheet now imports event-media-actions for the
-// Album section. Default both to no-op resolved values; specific
-// tests override per-test as needed.
+// Phase 3 P2a + P2b: EventSheet imports event-media-actions for the
+// Album section AND P2b's signEventMediaUrls for thumbnail URLs.
+// Default to empty / success; specific tests override per-test.
 jest.mock('../lib/event-media-actions', () => ({
   listEventMedia: jest.fn().mockResolvedValue({ data: [], error: null }),
   uploadEventPhoto: jest.fn().mockResolvedValue({ error: null }),
+  signEventMediaUrls: jest.fn().mockResolvedValue({
+    data: new Map<string, string>(),
+    error: null,
+  }),
+  deleteEventMedia: jest.fn().mockResolvedValue({ error: null }),
+}));
+
+// EventAlbumViewer is mocked as a tiny shim so EventSheet tests
+// don't have to fully render the viewer's internals — viewer tests
+// live in EventAlbumViewer.test.tsx. The shim still mounts an
+// `album-viewer` testID View when `visible` is true so tap-to-open
+// assertions in this file can verify the open state.
+jest.mock('../components/EventAlbumViewer', () => ({
+  EventAlbumViewer: (props: { visible: boolean }) => {
+    if (!props.visible) return null;
+    const React = require('react');
+    const { View } = require('react-native');
+    return React.createElement(View, { testID: 'album-viewer' });
+  },
 }));
 
 // expo-image-picker: stub permission + picker functions; tests
@@ -751,6 +770,10 @@ describe('EventSheet', () => {
       // empty list / no error; tests override as needed).
       eventMediaActions.listEventMedia.mockResolvedValue({ data: [], error: null });
       eventMediaActions.uploadEventPhoto.mockResolvedValue({ error: null });
+      eventMediaActions.signEventMediaUrls.mockResolvedValue({
+        data: new Map<string, string>(),
+        error: null,
+      });
       ImagePicker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true });
       ImagePicker.launchImageLibraryAsync.mockResolvedValue({
         canceled: false,
@@ -815,7 +838,7 @@ describe('EventSheet', () => {
       expect(eventMediaActions.listEventMedia).not.toHaveBeenCalled();
     });
 
-    it('renders a photo count when there are media items', async () => {
+    it('renders a thumbnail per media item when there are photos in the album (P2b)', async () => {
       eventMediaActions.listEventMedia.mockResolvedValue({
         data: [
           {
@@ -839,13 +862,32 @@ describe('EventSheet', () => {
         ],
         error: null,
       });
+      // P2b: signing happens after the list resolves; needs an entry
+      // per path so the thumbnails get URLs to render.
+      eventMediaActions.signEventMediaUrls.mockResolvedValue({
+        data: new Map([
+          ['x/y/a.jpg', 'https://signed/a'],
+          ['x/y/b.jpg', 'https://signed/b'],
+        ]),
+        error: null,
+      });
       render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
-      await waitFor(() =>
-        expect(screen.getByTestId('album-count').props.children).toBe('2 photos'),
-      );
+      // Thumb strip shows one Pressable per media row, plus the
+      // header label embeds the count: "Album (2)".
+      await waitFor(() => expect(screen.getByTestId('album-thumb-m1')).toBeOnTheScreen());
+      expect(screen.getByTestId('album-thumb-m2')).toBeOnTheScreen();
     });
 
-    it('pluralizes 1 photo correctly', async () => {
+    it('shows the empty-state copy when the album has no photos (P2b)', async () => {
+      eventMediaActions.listEventMedia.mockResolvedValue({ data: [], error: null });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() =>
+        expect(screen.getByTestId('album-count').props.children).toBe('No photos yet'),
+      );
+      expect(screen.queryByTestId('album-thumbs')).toBeNull();
+    });
+
+    it('tapping a thumbnail opens the full-screen viewer (P2b)', async () => {
       eventMediaActions.listEventMedia.mockResolvedValue({
         data: [
           {
@@ -860,10 +902,15 @@ describe('EventSheet', () => {
         ],
         error: null,
       });
+      eventMediaActions.signEventMediaUrls.mockResolvedValue({
+        data: new Map([['x/y/a.jpg', 'https://signed/a']]),
+        error: null,
+      });
       render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
-      await waitFor(() =>
-        expect(screen.getByTestId('album-count').props.children).toBe('1 photo'),
-      );
+      await waitFor(() => screen.getByTestId('album-thumb-m1'));
+      expect(screen.queryByTestId('album-viewer')).toBeNull();
+      fireEvent.press(screen.getByTestId('album-thumb-m1'));
+      expect(screen.getByTestId('album-viewer')).toBeOnTheScreen();
     });
 
     it('Add photo: picker → uploadEventPhoto → refetch on success', async () => {
