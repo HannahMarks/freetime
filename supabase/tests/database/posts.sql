@@ -16,7 +16,10 @@ select has_column('public', 'posts', 'author_id', 'posts has author_id');
 select has_column('public', 'posts', 'body', 'posts has body');
 select has_column('public', 'posts', 'created_at', 'posts has created_at');
 select col_not_null('public', 'posts', 'author_id', 'author_id NOT NULL');
-select col_not_null('public', 'posts', 'body', 'body NOT NULL');
+-- Pre-P4e this asserted body NOT NULL. P4e drops the NOT NULL so
+-- a media-only post is allowed; the body-or-media gate is now
+-- enforced via a CHECK rather than the column nullability.
+select col_is_null('public', 'posts', 'body', 'body is nullable (P4e — media-only posts allowed)');
 select is(
   (select relrowsecurity from pg_class where oid = 'public.posts'::regclass),
   true,

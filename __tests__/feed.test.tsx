@@ -16,6 +16,16 @@ jest.mock('../lib/like-actions', () => ({
   unlikePost: jest.fn().mockResolvedValue({ error: null }),
 }));
 
+// P4e: compose row uses expo-image-picker to attach a photo.
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+  launchImageLibraryAsync: jest.fn().mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///tmp/post-pick.jpg' }],
+  }),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
 // PostComments transitively imports Supabase via comment-actions.
 // Stub it with a thin shim so feed tests don't have to mock the
 // whole comments stack — the component's own behavior is covered
@@ -95,6 +105,8 @@ describe('FeedScreen', () => {
           createdAt: fiveMinAgo,
           likeCount: 0,
           likedByMe: false,
+          mediaPath: null,
+          mediaUrl: null,
         },
       ],
       error: null,
@@ -159,8 +171,8 @@ describe('FeedScreen', () => {
   it("shows a delete button only on the viewer's own posts", async () => {
     mockedList.mockResolvedValue({
       data: [
-        { id: 'p1', author: alice, body: 'from alice', createdAt: new Date(), likeCount: 0, likedByMe: false },
-        { id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false },
+        { id: 'p1', author: alice, body: 'from alice', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null },
+        { id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null },
       ],
       error: null,
     });
@@ -172,7 +184,7 @@ describe('FeedScreen', () => {
 
   it('tap trash → Alert → destructive → calls deletePost + removes the row locally', async () => {
     mockedList.mockResolvedValue({
-      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false }],
+      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null }],
       error: null,
     });
     mockedDelete.mockResolvedValue({ error: null });
@@ -192,7 +204,7 @@ describe('FeedScreen', () => {
 
   it('Alert "Cancel" does NOT call deletePost', async () => {
     mockedList.mockResolvedValue({
-      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false }],
+      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null }],
       error: null,
     });
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, btns) => {
@@ -208,7 +220,7 @@ describe('FeedScreen', () => {
 
   it("toasts and doesn't remove the row when deletePost fails", async () => {
     mockedList.mockResolvedValue({
-      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false }],
+      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null }],
       error: null,
     });
     mockedDelete.mockResolvedValue({
@@ -232,7 +244,7 @@ describe('FeedScreen', () => {
   describe('comments toggle (P4c)', () => {
     it('shows a "Comment" toggle on each post row, with the comments thread hidden by default', async () => {
       mockedList.mockResolvedValue({
-        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date(), likeCount: 0, likedByMe: false }],
+        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null }],
         error: null,
       });
       render(<FeedScreen />);
@@ -245,7 +257,7 @@ describe('FeedScreen', () => {
 
     it('tapping the toggle expands the inline comments thread; tap again collapses', async () => {
       mockedList.mockResolvedValue({
-        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date(), likeCount: 0, likedByMe: false }],
+        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null }],
         error: null,
       });
       render(<FeedScreen />);
@@ -259,8 +271,8 @@ describe('FeedScreen', () => {
     it('multiple posts can have their threads open at the same time', async () => {
       mockedList.mockResolvedValue({
         data: [
-          { id: 'p1', author: alice, body: 'one', createdAt: new Date(), likeCount: 0, likedByMe: false },
-          { id: 'p2', author: alice, body: 'two', createdAt: new Date(), likeCount: 0, likedByMe: false },
+          { id: 'p1', author: alice, body: 'one', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null },
+          { id: 'p2', author: alice, body: 'two', createdAt: new Date(), likeCount: 0, likedByMe: false, mediaPath: null, mediaUrl: null },
         ],
         error: null,
       });
@@ -292,6 +304,8 @@ describe('FeedScreen', () => {
             createdAt: new Date(),
             likeCount: 3,
             likedByMe: true,
+            mediaPath: null,
+            mediaUrl: null,
           },
           {
             id: 'p2',
@@ -300,6 +314,8 @@ describe('FeedScreen', () => {
             createdAt: new Date(),
             likeCount: 0,
             likedByMe: false,
+            mediaPath: null,
+            mediaUrl: null,
           },
         ],
         error: null,
@@ -323,6 +339,8 @@ describe('FeedScreen', () => {
             createdAt: new Date(),
             likeCount: 0,
             likedByMe: false,
+            mediaPath: null,
+            mediaUrl: null,
           },
         ],
         error: null,
@@ -348,6 +366,8 @@ describe('FeedScreen', () => {
             createdAt: new Date(),
             likeCount: 2,
             likedByMe: true,
+            mediaPath: null,
+            mediaUrl: null,
           },
         ],
         error: null,
@@ -375,6 +395,8 @@ describe('FeedScreen', () => {
             createdAt: new Date(),
             likeCount: 0,
             likedByMe: false,
+            mediaPath: null,
+            mediaUrl: null,
           },
         ],
         error: null,
@@ -387,6 +409,124 @@ describe('FeedScreen', () => {
       );
       // Count reverts back to 0 → hidden again.
       expect(screen.queryByTestId('feed-like-count-p1')).toBeNull();
+    });
+  });
+
+  describe('post media (P4e)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ImagePicker = require('expo-image-picker');
+
+    beforeEach(() => {
+      ImagePicker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true });
+      ImagePicker.launchImageLibraryAsync.mockResolvedValue({
+        canceled: false,
+        assets: [{ uri: 'file:///tmp/post-pick.jpg' }],
+      });
+    });
+
+    it('tapping the photo button picks an image and shows the pending preview', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<FeedScreen />);
+      await flushAsync();
+      expect(screen.queryByTestId('compose-pending-media')).toBeNull();
+      fireEvent.press(screen.getByTestId('compose-pick-photo'));
+      await waitFor(() =>
+        expect(screen.getByTestId('compose-pending-media')).toBeOnTheScreen(),
+      );
+    });
+
+    it('passes the picked URI to createPost as mediaUri on Post', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      mockedCreate.mockResolvedValue({ id: 'p-new', error: null });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('compose-pick-photo'));
+      await waitFor(() => screen.getByTestId('compose-pending-media'));
+      // With a media attached, an empty body is still postable
+      // (media-only post).
+      fireEvent.press(screen.getByTestId('compose-post'));
+      await waitFor(() =>
+        expect(mockedCreate).toHaveBeenCalledWith({
+          body: '',
+          mediaUri: 'file:///tmp/post-pick.jpg',
+        }),
+      );
+    });
+
+    it('Post button enables when a photo is attached even with empty body', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      mockedCreate.mockResolvedValue({ id: 'p-new', error: null });
+      render(<FeedScreen />);
+      await flushAsync();
+      // Empty body → Post disabled.
+      fireEvent.press(screen.getByTestId('compose-post'));
+      expect(mockedCreate).not.toHaveBeenCalled();
+      // Attach a photo → Post enabled.
+      fireEvent.press(screen.getByTestId('compose-pick-photo'));
+      await waitFor(() => screen.getByTestId('compose-pending-media'));
+      fireEvent.press(screen.getByTestId('compose-post'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+    });
+
+    it('clears the pending photo when ×× is tapped', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('compose-pick-photo'));
+      await waitFor(() => screen.getByTestId('compose-pending-media'));
+      fireEvent.press(screen.getByTestId('compose-remove-media'));
+      expect(screen.queryByTestId('compose-pending-media')).toBeNull();
+    });
+
+    it('clears the pending photo after a successful post', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      mockedCreate.mockResolvedValue({ id: 'p-new', error: null });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('compose-pick-photo'));
+      await waitFor(() => screen.getByTestId('compose-pending-media'));
+      fireEvent.changeText(screen.getByTestId('compose-input'), 'with photo');
+      fireEvent.press(screen.getByTestId('compose-post'));
+      await waitFor(() => expect(mockedCreate).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(screen.queryByTestId('compose-pending-media')).toBeNull(),
+      );
+    });
+
+    it('renders the attached photo on a post row when mediaUrl is set', async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            id: 'p1',
+            author: alice,
+            body: 'with photo',
+            createdAt: new Date(),
+            likeCount: 0,
+            likedByMe: false,
+            mediaPath: 'a/x.jpg',
+            mediaUrl: 'https://signed/x',
+          },
+        ],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      const img = screen.getByTestId('feed-post-media-p1');
+      expect(img.props.source.uri).toBe('https://signed/x');
+    });
+
+    it('toasts when the media-library permission is denied', async () => {
+      ImagePicker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: false });
+      mockedList.mockResolvedValue({ data: [], error: null });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('compose-pick-photo'));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringMatching(/photo library access/i),
+        ),
+      );
+      expect(screen.queryByTestId('compose-pending-media')).toBeNull();
     });
   });
 });
