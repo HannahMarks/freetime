@@ -11,6 +11,18 @@ jest.mock('../lib/post-actions', () => ({
   deletePost: jest.fn(),
 }));
 
+// PostComments transitively imports Supabase via comment-actions.
+// Stub it with a thin shim so feed tests don't have to mock the
+// whole comments stack — the component's own behavior is covered
+// in PostComments.test.tsx.
+jest.mock('../components/PostComments', () => ({
+  PostComments: (props: { postId: string }) => {
+    const React = require('react');
+    const { View } = require('react-native');
+    return React.createElement(View, { testID: `comments-${props.postId}` });
+  },
+}));
+
 jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
 }));
@@ -208,5 +220,49 @@ describe('FeedScreen', () => {
     // Row stays in the list.
     expect(screen.getByTestId('feed-post-p2')).toBeOnTheScreen();
     alertSpy.mockRestore();
+  });
+
+  describe('comments toggle (P4c)', () => {
+    it('shows a "Comment" toggle on each post row, with the comments thread hidden by default', async () => {
+      mockedList.mockResolvedValue({
+        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date() }],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      expect(screen.getByTestId('feed-comments-toggle-p1')).toBeOnTheScreen();
+      // PostComments is stubbed; its testID is `comments-${postId}`. It
+      // should NOT be rendered until the user opens the thread.
+      expect(screen.queryByTestId('comments-p1')).toBeNull();
+    });
+
+    it('tapping the toggle expands the inline comments thread; tap again collapses', async () => {
+      mockedList.mockResolvedValue({
+        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date() }],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('feed-comments-toggle-p1'));
+      expect(screen.getByTestId('comments-p1')).toBeOnTheScreen();
+      fireEvent.press(screen.getByTestId('feed-comments-toggle-p1'));
+      expect(screen.queryByTestId('comments-p1')).toBeNull();
+    });
+
+    it('multiple posts can have their threads open at the same time', async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          { id: 'p1', author: alice, body: 'one', createdAt: new Date() },
+          { id: 'p2', author: alice, body: 'two', createdAt: new Date() },
+        ],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('feed-comments-toggle-p1'));
+      fireEvent.press(screen.getByTestId('feed-comments-toggle-p2'));
+      expect(screen.getByTestId('comments-p1')).toBeOnTheScreen();
+      expect(screen.getByTestId('comments-p2')).toBeOnTheScreen();
+    });
   });
 });
