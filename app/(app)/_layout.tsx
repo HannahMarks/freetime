@@ -72,6 +72,23 @@ function EventsIcon({ color }: { color: string }) {
   );
 }
 
+/**
+ * Manual-drawn feed icon — three stacked horizontal bars, each a
+ * little shorter than the previous (a "newsfeed" / list-of-posts
+ * shape). Distinct enough from the events spark and the calendar
+ * grid that the tab bar reads as three different kinds of surface
+ * at a glance.
+ */
+function FeedIcon({ color }: { color: string }) {
+  return (
+    <View style={iconStyles.container}>
+      <View style={[iconStyles.feedLineTop, { backgroundColor: color }]} />
+      <View style={[iconStyles.feedLineMid, { backgroundColor: color }]} />
+      <View style={[iconStyles.feedLineBot, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
 const iconStyles = StyleSheet.create({
   // Outer wrapper holds enough vertical room for the rings to extend
   // ABOVE the calendar body without being clipped (the body is 22 tall
@@ -146,6 +163,32 @@ const iconStyles = StyleSheet.create({
     height: 2,
     borderRadius: 1,
   },
+  // Feed icon — three stacked bars of decreasing length, suggesting
+  // a stack of posts trailing off into older content below.
+  feedLineTop: {
+    position: 'absolute',
+    top: 6,
+    left: 2,
+    width: 20,
+    height: 2.5,
+    borderRadius: 1.25,
+  },
+  feedLineMid: {
+    position: 'absolute',
+    top: 12,
+    left: 2,
+    width: 16,
+    height: 2.5,
+    borderRadius: 1.25,
+  },
+  feedLineBot: {
+    position: 'absolute',
+    top: 18,
+    left: 2,
+    width: 12,
+    height: 2.5,
+    borderRadius: 1.25,
+  },
 });
 
 export default function AppTabsLayout() {
@@ -206,6 +249,27 @@ export default function AppTabsLayout() {
               ]}
             >
               <EventsIcon color={focused ? '#111' : '#888'} />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="feed"
+        options={{
+          title: 'Feed',
+          tabBarActiveTintColor: userColor,
+          tabBarIcon: ({ focused }) => (
+            <View
+              style={[
+                styles.iconPill,
+                {
+                  backgroundColor: focused
+                    ? hexAlpha(userColor, 0.28)
+                    : 'transparent',
+                },
+              ]}
+            >
+              <FeedIcon color={focused ? '#111' : '#888'} />
             </View>
           ),
         }}
