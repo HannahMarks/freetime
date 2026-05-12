@@ -923,5 +923,99 @@ describe('EventSheet', () => {
       // Mount-time fetch only — no refetch after the failed upload.
       expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1);
     });
+
+    it('multi-photo: picker returns N assets → uploadEventPhoto called N times → single refetch', async () => {
+      ImagePicker.launchImageLibraryAsync.mockResolvedValue({
+        canceled: false,
+        assets: [
+          { uri: 'file:///tmp/a.jpg' },
+          { uri: 'file:///tmp/b.jpg' },
+          { uri: 'file:///tmp/c.jpg' },
+        ],
+      });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1));
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() =>
+        expect(eventMediaActions.uploadEventPhoto).toHaveBeenCalledTimes(3),
+      );
+      // Each call carries the right URI for that asset.
+      const calls = eventMediaActions.uploadEventPhoto.mock.calls.map(
+        (c: unknown[]) => (c[0] as { uri: string }).uri,
+      );
+      expect(calls).toEqual([
+        'file:///tmp/a.jpg',
+        'file:///tmp/b.jpg',
+        'file:///tmp/c.jpg',
+      ]);
+      // Album refetches once after the batch (not three times) so the
+      // viewer doesn't flicker through intermediate states.
+      await waitFor(() =>
+        expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(2),
+      );
+    });
+
+    it('multi-photo: passes allowsMultipleSelection to the picker', async () => {
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalled());
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() => expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalled());
+      const opts = ImagePicker.launchImageLibraryAsync.mock.calls[0][0];
+      expect(opts.allowsMultipleSelection).toBe(true);
+      expect(typeof opts.selectionLimit).toBe('number');
+      expect(opts.selectionLimit).toBeGreaterThan(1);
+    });
+
+    it('multi-photo: continues the batch when one upload fails, toasts the first error, refetches if at least one succeeded', async () => {
+      ImagePicker.launchImageLibraryAsync.mockResolvedValue({
+        canceled: false,
+        assets: [
+          { uri: 'file:///tmp/a.jpg' },
+          { uri: 'file:///tmp/bad.jpg' },
+          { uri: 'file:///tmp/c.jpg' },
+        ],
+      });
+      // First call ok, second fails, third ok.
+      eventMediaActions.uploadEventPhoto
+        .mockResolvedValueOnce({ error: null })
+        .mockResolvedValueOnce({
+          error: "Couldn't upload the photo. Please try again.",
+        })
+        .mockResolvedValueOnce({ error: null });
+
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1));
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() =>
+        expect(eventMediaActions.uploadEventPhoto).toHaveBeenCalledTimes(3),
+      );
+      // The toast fires once with the first error, not per-failure
+      // (avoids a flood when the network drops mid-batch).
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      // Refetch happens because ≥1 photo landed — the album row count
+      // should reflect that.
+      await waitFor(() =>
+        expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(2),
+      );
+    });
+
+    it('multi-photo: when ALL uploads fail, toast fires and album does NOT refetch', async () => {
+      ImagePicker.launchImageLibraryAsync.mockResolvedValue({
+        canceled: false,
+        assets: [
+          { uri: 'file:///tmp/a.jpg' },
+          { uri: 'file:///tmp/b.jpg' },
+        ],
+      });
+      eventMediaActions.uploadEventPhoto.mockResolvedValue({
+        error: "Couldn't upload the photo. Please try again.",
+      });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1));
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      // Mount-time fetch only — nothing landed, so no refetch.
+      expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1);
+    });
   });
 });
