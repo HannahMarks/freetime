@@ -33,12 +33,17 @@ select lives_ok(
   'weekly recurrence_rule accepted on unavailable_days'
 );
 
--- monthly is NOT allowed (yet).
+-- 'daily' is NOT a supported freq — gate stays in place against
+-- old clients writing rules the server doesn't know how to expand.
+-- (This used to test 'monthly' as the rejection case, but PR C
+-- widened the CHECK to allow monthly + yearly. Switching the
+-- assertion to 'daily' keeps the "unknown freq is still rejected"
+-- coverage intact.)
 select throws_ok(
   $$insert into public.unavailable_days (user_id, date, title, recurrence_rule)
     values ('00000000-0000-0000-0000-0000000000d1',
             current_date + interval '2 days', 'Test',
-            '{"freq":"monthly"}'::jsonb)$$,
+            '{"freq":"daily"}'::jsonb)$$,
   '23514',
   null,
   'unknown freq rejected by recurrence_rule_freq_supported check'
