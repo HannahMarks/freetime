@@ -138,8 +138,56 @@ describe('listFeedPosts', () => {
       id: 'p1',
       author: alice,
       body: 'Hi from Alice',
+      // P4d: each row carries count + me-liked annotations. Missing
+      // `likes` defaults to count=0, likedByMe=false.
+      likeCount: 0,
+      likedByMe: false,
     });
     expect(data?.[0].createdAt).toBeInstanceOf(Date);
+    // The select clause must include the likes embed so likeCount /
+    // likedByMe can be computed without a separate query.
+    expect(builder.select).toHaveBeenCalledWith(
+      expect.stringMatching(/likes\(liker_id\)/),
+    );
+  });
+
+  it('annotates each post with likeCount + likedByMe from the embedded likes (P4d)', async () => {
+    mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'me-id' } } });
+    mockSupabase.from.mockReturnValue(
+      chainable({
+        data: [
+          {
+            id: 'p1',
+            author_id: alice.id,
+            body: 'Liked by me + Bob',
+            created_at: '2026-05-22T18:00:00.000Z',
+            author: alice,
+            likes: [{ liker_id: 'me-id' }, { liker_id: bob.id }],
+          },
+          {
+            id: 'p2',
+            author_id: bob.id,
+            body: 'Liked by no one',
+            created_at: '2026-05-22T17:00:00.000Z',
+            author: bob,
+            likes: [],
+          },
+          {
+            id: 'p3',
+            author_id: alice.id,
+            body: 'Liked by Bob only',
+            created_at: '2026-05-22T16:00:00.000Z',
+            author: alice,
+            likes: [{ liker_id: bob.id }],
+          },
+        ],
+        error: null,
+      }),
+    );
+    const { data } = await listFeedPosts();
+    expect(data?.[0]).toMatchObject({ id: 'p1', likeCount: 2, likedByMe: true });
+    expect(data?.[1]).toMatchObject({ id: 'p2', likeCount: 0, likedByMe: false });
+    expect(data?.[2]).toMatchObject({ id: 'p3', likeCount: 1, likedByMe: false });
   });
 
   it('drops rows whose embedded author join is null (defensive)', async () => {
