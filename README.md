@@ -157,9 +157,11 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 
 ### Phase 4 — social feed + reactions
 
-- ⏳ Schema: `posts`, `comments`, `likes`
-- ⏳ Feed query + UI
-- ⏳ Comment + like interactions; notifications for the post author
+- 🚧 `posts` schema (P4a) — table with `(author_id, body, created_at)` + author FK to `profiles` (PostgREST embed pattern). RLS: SELECT visible to author + accepted friends (reuses `is_friend_of` helper); INSERT/UPDATE/DELETE author-only with `author_id = auth.uid()` pinned in WITH CHECK so a forged author_id is rejected at the policy. Index on `(author_id, created_at desc)` for the feed query. New `lib/post-actions.ts` (`createPost`, `listFeedPosts`, `deletePost`); pgTAP covers shape + body-not-blank CHECK + RLS smoke (author + accepted friend see it, unrelated user gets empty, can't forge author_id)
+- ⏳ Feed tab + UI (P4b) — list visible posts newest-first, compose box, delete-own
+- ⏳ Comments schema + UI (P4c)
+- ⏳ Likes schema + UI (P4d)
+- ⏳ Media attachments on posts (P4e) — widen `posts.body` CHECK to allow media-only posts, reuse the `event-media` Storage pattern
 
 ## Project conventions
 
