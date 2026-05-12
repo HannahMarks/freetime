@@ -159,6 +159,51 @@ describe('EventsScreen', () => {
     expect(lastSheetProps?.editing?.id).toBe('ev1');
   });
 
+  it('paints the FAB and event rows in the viewer\'s darker user color (matches calendar tab)', async () => {
+    mockedList.mockResolvedValue({
+      data: [
+        {
+          kind: 'event',
+          id: 'ev1',
+          owner: alice,
+          startsAt: new Date(2026, 4, 20, 18, 0),
+          endsAt: new Date(2026, 4, 20, 21, 0),
+          title: 'Birthday party',
+          notes: null,
+          location: null,
+        },
+      ],
+      error: null,
+    });
+    render(<EventsScreen />);
+    await flushAsync();
+
+    // Profile color is #9C27B0; darkened by EVENT_DARKEN_AMOUNT (0.35)
+    // produces the on-screen accent. We don't assert the exact hex
+    // (color-helpers.test covers the math) — only that the FAB +
+    // event row borders are NOT the un-darkened profile color (so a
+    // regression that skips the darken step fails here) and NOT the
+    // host's color (which the rows used to use).
+    const fab = screen.getByTestId('events-fab');
+    const fabStyle = Array.isArray(fab.props.style)
+      ? Object.assign({}, ...fab.props.style.filter(Boolean))
+      : fab.props.style;
+    expect(String(fabStyle.backgroundColor).toLowerCase()).not.toBe('#9c27b0');
+
+    const row = screen.getByTestId('event-row-ev1');
+    const rowStyle = Array.isArray(row.props.style)
+      ? Object.assign({}, ...row.props.style.filter(Boolean))
+      : row.props.style;
+    expect(String(rowStyle.borderLeftColor).toLowerCase()).not.toBe(
+      alice.color.toLowerCase(),
+    );
+    // FAB and row share the same accent so the events tab reads as
+    // one consistent surface.
+    expect(String(rowStyle.borderLeftColor).toLowerCase()).toBe(
+      String(fabStyle.backgroundColor).toLowerCase(),
+    );
+  });
+
   it('refetches when the sheet reports a save (onSaved callback)', async () => {
     mockedList.mockResolvedValue({ data: [], error: null });
     render(<EventsScreen />);

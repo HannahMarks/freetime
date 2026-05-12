@@ -14,7 +14,12 @@ import { darkenHexColor } from '../lib/color-helpers';
  * relevant color, white interior — visually subordinate so the
  * primary keeps reading as the entry point. */
 const PRIMARY_SIZE = 56;
-const SUB_SIZE = 48;
+// Sub-FABs match the primary's diameter so the three buttons read as
+// a consistent stack when expanded — the user pointed out that the
+// previous 48px sub-FABs looked visually subordinate, but the intent
+// of the multi-action stack is "three peer actions", not "one
+// dominant + two helpers". Equal sizing makes that read correctly.
+const SUB_SIZE = 56;
 const SUB_GAP = 14;
 const DEFAULT_COLOR = '#111';
 /** How much darker the event accent is vs. the user's color. 0.35
@@ -146,13 +151,71 @@ function SparkIcon({ color }: { color: string }) {
   );
 }
 
-/** Simple clock-face glyph for the Busy sub-FAB — a ringed circle with
- * a horizontal bar for the minute hand. Cheap and recognisable
- * without pulling an icon font. */
+/** Analog clock face for the Busy sub-FAB, drawn at the canonical
+ * "10:10" pose (hour hand to 10, minute hand to 2) — the same
+ * smiling-shape every wristwatch ad has been using since the 1950s
+ * because it leaves the brand area at 12 visible and reads as
+ * "friendly" rather than "you're going to be late". Both hands +
+ * the center dot are painted in the user's profile color so the
+ * icon stays on-brand.
+ *
+ * Drawn entirely with positioned + rotated Views (no SVG dep,
+ * no icon font). Each hand is a 0×0 wrapper centered at the
+ * clock face center, with the actual hand extending UP from that
+ * point and the wrapper rotated by the hour-position angle — the
+ * standard RN trick for getting clean rotation pivots without
+ * `transformOrigin` (which is flaky across RN versions). */
+const CLOCK_SIZE = 22;
+
+function ClockHand({
+  color,
+  length,
+  thickness,
+  rotateDeg,
+}: {
+  color: string;
+  length: number;
+  thickness: number;
+  rotateDeg: number;
+}) {
+  return (
+    <View
+      style={[
+        iconStyles.clockHandWrap,
+        { transform: [{ rotate: `${rotateDeg}deg` }] },
+      ]}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: -thickness / 2,
+          width: thickness,
+          height: length,
+          backgroundColor: color,
+          borderRadius: thickness / 2,
+        }}
+      />
+    </View>
+  );
+}
+
 function ClockIcon({ color }: { color: string }) {
   return (
-    <View style={[iconStyles.clockRing, { borderColor: color }]}>
-      <View style={[iconStyles.clockHand, { backgroundColor: color }]} />
+    <View
+      style={[
+        iconStyles.clockFace,
+        { borderColor: color },
+      ]}
+    >
+      {/* Hour hand → 10 o'clock = -60° from 12 (counter-clockwise). */}
+      <ClockHand color={color} length={5.5} thickness={2} rotateDeg={-60} />
+      {/* Minute hand → 2 o'clock = +60° from 12. Longer than the
+          hour hand by ~50% (real-clock proportions). */}
+      <ClockHand color={color} length={8} thickness={1.5} rotateDeg={60} />
+      {/* Center pivot dot — covers the slight visual gap where the
+          two hands' bottoms meet. */}
+      <View style={[iconStyles.clockCenter, { backgroundColor: color }]} />
     </View>
   );
 }
@@ -218,22 +281,34 @@ const iconStyles = StyleSheet.create({
     height: 2.5,
     borderRadius: 1.25,
   },
-  clockRing: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  clockFace: {
+    width: CLOCK_SIZE,
+    height: CLOCK_SIZE,
+    borderRadius: CLOCK_SIZE / 2,
     borderWidth: 2,
+    // `relative` so absolutely-positioned hands pivot from the
+    // face's center, not the screen.
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  clockHand: {
-    width: 5,
-    height: 1.5,
+  /** A 0×0 wrapper positioned at the face center. Rotating it
+   * around its own (collapsed) origin rotates the hand inside,
+   * which extends upward from `bottom: 0` of this wrapper —
+   * effectively rotating around the clock face's center. */
+  clockHandWrap: {
     position: 'absolute',
-    // Offset slightly above the centre so the hand reads as pointing
-    // to the 9-ish position (rather than dead-centre, which would
-    // just look like a smudge).
-    top: 8,
-    left: 4,
+    left: '50%',
+    top: '50%',
+    width: 0,
+    height: 0,
+  },
+  clockCenter: {
+    position: 'absolute',
+    top: CLOCK_SIZE / 2 - 1.5,
+    left: CLOCK_SIZE / 2 - 1.5,
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
   },
 });

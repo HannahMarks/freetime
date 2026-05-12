@@ -15,12 +15,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { EventSheet } from '../../components/EventSheet';
+import { EVENT_DARKEN_AMOUNT } from '../../components/FabMultiAction';
 import { useAuth } from '../../lib/auth';
 import {
   type FriendProfile,
   formatTimeRange,
   isoDate,
 } from '../../lib/calendar-helpers';
+import { darkenHexColor } from '../../lib/color-helpers';
 import { listEvents } from '../../lib/event-actions';
 import type { EventItem } from '../../lib/event-helpers';
 import { listFriendships } from '../../lib/friend-actions';
@@ -130,6 +132,13 @@ export default function EventsScreen() {
   const today = new Date();
   const todayIso = isoDate(today);
 
+  // Single accent color shared by the events tab — same value used
+  // by the Events sub-FAB outline on the calendar tab + the
+  // event-day dots on the month grid + the day-timeline event
+  // blocks. Anywhere an "event" is signaled in the UI, we want it
+  // to read as the same hue so the affordance stays recognizable.
+  const eventColor = darkenHexColor(profile?.color ?? FAB_BG_FALLBACK, EVENT_DARKEN_AMOUNT);
+
   return (
     <View style={styles.container}>
       {loading ? (
@@ -164,10 +173,11 @@ export default function EventsScreen() {
               style={({ pressed }) => [
                 styles.row,
                 {
-                  // Tint the left border in the host's color, same
-                  // pattern as busy_block / unavailable_day rendering
-                  // on the day timeline.
-                  borderLeftColor: item.owner.color,
+                  // Tint the left border in the viewer's darker
+                  // user color — matches the Events sub-FAB outline
+                  // + on-calendar event accents so the "this is an
+                  // event" cue stays consistent across screens.
+                  borderLeftColor: eventColor,
                 },
                 pressed && styles.rowPressed,
               ]}
@@ -196,7 +206,11 @@ export default function EventsScreen() {
         }}
         style={({ pressed }) => [
           styles.fab,
-          { backgroundColor: profile?.color ?? FAB_BG_FALLBACK },
+          // Filled in the same darker user-color the rest of the
+          // events UI uses — keeps the FAB recognizable as the
+          // "event" entry point alongside the multi-action FAB on
+          // the calendar tab.
+          { backgroundColor: eventColor },
           pressed && styles.fabPressed,
         ]}
       >
