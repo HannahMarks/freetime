@@ -35,7 +35,7 @@ import {
   updateUnavailableDay,
 } from '../lib/availability-actions';
 import { CalendarItem, formatTimeRange } from '../lib/calendar-helpers';
-import type { RecurrenceRule } from '../lib/recurrence';
+import type { RecurrenceFreq, RecurrenceRule } from '../lib/recurrence';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
@@ -141,39 +141,60 @@ function parseIsoDate(s: string): Date {
   return new Date(y, m - 1, d);
 }
 
+/** "1st", "2nd", "3rd", "4th", … (used by monthly summary). */
+function ordinal(n: number): string {
+  const j = n % 10;
+  const k = n % 100;
+  if (j === 1 && k !== 11) return `${n}st`;
+  if (j === 2 && k !== 12) return `${n}nd`;
+  if (j === 3 && k !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
 /** Build the view-mode recurrence summary string from a rule. Examples:
  * - `{freq:'weekly'}` + Mon base → "Weekly on Monday"
  * - `{freq:'weekly', byDay:[1,3,5]}` → "Weekly on Mon, Wed, Fri"
  * - `{freq:'weekly', byDay:[1], until:'2026-12-31'}` → "Weekly on Monday until Dec 31, 2026"
+ * - `{freq:'monthly'}` + May 15 base → "Monthly on the 15th"
+ * - `{freq:'yearly'}` + May 15 base → "Yearly on May 15"
  *
  * Pure (no JSX, no React) so it's trivial to unit-test if we ever do.
  * Locale-aware via `Intl.DateTimeFormat`. */
 function summarizeRecurrence(rule: RecurrenceRule, baseStart: Date): string {
-  const baseWeekday = baseStart.getDay();
-  const days =
-    rule.byDay && rule.byDay.length > 0 ? [...rule.byDay] : [baseWeekday];
-  days.sort((a, b) => a - b);
-
-  // Single day → use the full weekday name; multiple → 3-letter abbrevs
-  // separated by commas. Keeps the line scannable in both common cases.
-  let dayPart: string;
-  if (days.length === 1) {
-    dayPart = WEEKDAY_FULL_NAMES[days[0]];
+  let head: string;
+  if (rule.freq === 'monthly') {
+    head = `Monthly on the ${ordinal(baseStart.getDate())}`;
+  } else if (rule.freq === 'yearly') {
+    const monthDay = new Intl.DateTimeFormat(undefined, {
+      month: 'long',
+      day: 'numeric',
+    }).format(baseStart);
+    head = `Yearly on ${monthDay}`;
   } else {
-    const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    dayPart = days.map((d) => SHORT[d]).join(', ');
+    // weekly — keep the existing byDay-aware formatting
+    const baseWeekday = baseStart.getDay();
+    const days =
+      rule.byDay && rule.byDay.length > 0 ? [...rule.byDay] : [baseWeekday];
+    days.sort((a, b) => a - b);
+    let dayPart: string;
+    if (days.length === 1) {
+      dayPart = WEEKDAY_FULL_NAMES[days[0]];
+    } else {
+      const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      dayPart = days.map((d) => SHORT[d]).join(', ');
+    }
+    head = `Weekly on ${dayPart}`;
   }
 
-  let summary = `Weekly on ${dayPart}`;
   if (rule.until) {
     const untilDate = parseIsoDate(rule.until);
-    summary += ` until ${new Intl.DateTimeFormat(undefined, {
+    return `${head} until ${new Intl.DateTimeFormat(undefined, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     }).format(untilDate)}`;
   }
-  return summary;
+  return head;
 }
 
 /** Format a single date as "Wednesday, May 13, 2026" for view mode. */
@@ -219,16 +240,22 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
   const [formMode, setFormMode] = useState<boolean>(!editing);
   // Custom popover menu state — opens below the three-dots button.
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
-  // Repeat-weekly toggle. When ON, the form expands to show day-of-week
-  // chips + an "until" date picker. The toggle being OFF means a one-off
-  // (recurrenceRule = null on save). Always false in unavailable-day
-  // mode — recurring all-day markers are out of scope for v2.
+  // Repeats toggle. When ON, the form expands to show a freq picker
+  // (Weekly / Monthly / Yearly) + freq-specific extras (weekly gets
+  // day-of-week chips; monthly + yearly just inherit the base's day).
+  // Toggle OFF → one-off (recurrenceRule = null on save).
   const [repeatWeekly, setRepeatWeekly] = useState<boolean>(false);
+  // Active recurrence frequency. Defaults to 'weekly' so flipping the
+  // toggle on without changing anything produces the same v1 result.
+  // Monthly + yearly added in PR C — they walk +1 month / +1 year per
+  // occurrence and ignore byDay (which is a weekly-only selector).
+  const [freq, setFreq] = useState<RecurrenceFreq>('weekly');
   // Selected weekdays (0=Sun…6=Sat). Empty array = "use the base's
   // weekday" (the helper falls back to that). Multi-select chips below
   // the toggle let the user pick "Mon, Wed, Fri"-style schedules. When
-  // the user toggles "Repeat weekly" on at create-time we pre-select
+  // the user toggles "Repeats" on at create-time we pre-select
   // the weekday of `start` so the rule isn't accidentally empty.
+  // Only meaningful when freq === 'weekly'.
   const [byDay, setByDay] = useState<number[]>([]);
   // Optional end-of-series date as YYYY-MM-DD. null = no `until` clause
   // (the series repeats indefinitely; the helper still bounds expansion
@@ -393,6 +420,7 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
             ? editing.recurrenceRule
             : null;
       setRepeatWeekly(editingRule != null);
+      setFreq(editingRule?.freq ?? 'weekly');
       setByDay(editingRule?.byDay ?? []);
       setUntil(editingRule?.until ?? null);
       // Pre-fill the occurrence-date picker. For an unavailable_day,
@@ -414,8 +442,14 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
    * occurrence-override save paths. */
   function buildRecurrenceRule(): RecurrenceRule | null {
     if (!repeatWeekly) return null;
-    const rule: RecurrenceRule = { freq: 'weekly' };
-    if (byDay.length > 0) rule.byDay = [...byDay].sort((a, b) => a - b);
+    const rule: RecurrenceRule = { freq };
+    // byDay is weekly-only — including it on monthly / yearly rules
+    // would persist a no-op field. The schema CHECK doesn't care, but
+    // keeping the JSON tidy avoids confusion when reading rows from
+    // the DB.
+    if (freq === 'weekly' && byDay.length > 0) {
+      rule.byDay = [...byDay].sort((a, b) => a - b);
+    }
     if (until) rule.until = until;
     return rule;
   }
@@ -976,13 +1010,15 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
               ) : null}
 
               {/* Recurrence section. Same UI for busy + unavailable
-                  modes — recurring all-day markers ("every Sunday I'm
-                  unavailable") use the same `recurrence_rule` shape +
-                  `expandOccurrences` helper as recurring busy blocks.
-                  Hand-rolled mini-switch (not RN's Switch) keeps the
-                  off / on visuals monochrome. Toggling Repeat on for
-                  the first time auto-seeds `byDay` with the start's
-                  weekday so the chip row isn't visually empty. */}
+                  modes — recurring all-day markers ("every 1st of the
+                  month I'm out") use the same `recurrence_rule` shape
+                  + `expandOccurrences` helper as recurring busy
+                  blocks. Hand-rolled mini-switch (not RN's Switch)
+                  keeps the off / on visuals monochrome. Toggling
+                  Repeats on for the first time auto-seeds `byDay`
+                  with the start's weekday so the chip row isn't
+                  visually empty when freq is 'weekly'. PR C widens
+                  the freq set to monthly + yearly. */}
               <Pressable
                 onPress={() => {
                   setRepeatWeekly((v) => {
@@ -995,14 +1031,14 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                 }}
                 accessibilityRole="switch"
                 accessibilityState={{ checked: repeatWeekly }}
-                accessibilityLabel="Repeat weekly"
+                accessibilityLabel="Repeats"
                 testID="repeat-weekly-toggle"
                 style={({ pressed }) => [
                   styles.repeatRow,
                   pressed && styles.repeatRowPressed,
                 ]}
               >
-                <Text style={styles.repeatLabel}>Repeat weekly</Text>
+                <Text style={styles.repeatLabel}>Repeats</Text>
                 <View
                   style={[
                     styles.repeatSwitch,
@@ -1020,11 +1056,50 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
 
               {repeatWeekly ? (
                 <>
-                  {/* Day-of-week multi-picker. 7 chips, tap to toggle
-                      that weekday in/out of `byDay`. Empty selection
-                      saves as no `byDay` (helper falls back to the
-                      base block's weekday). */}
-                  <View style={styles.dayChipRow} testID="byday-chips">
+                  {/* Frequency picker — same shape EventSheet uses.
+                      Weekly / Monthly / Yearly chip row; the selected
+                      chip is dark-filled. byDay only renders when
+                      freq is 'weekly' (it's a weekly-only concept). */}
+                  <View style={styles.freqRow} testID="busy-freq-row">
+                    {(['weekly', 'monthly', 'yearly'] as const).map((f) => {
+                      const selected = freq === f;
+                      return (
+                        <Pressable
+                          key={f}
+                          onPress={() => setFreq(f)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ checked: selected }}
+                          accessibilityLabel={`Repeat ${f}`}
+                          testID={`busy-freq-${f}`}
+                          style={[
+                            styles.freqChip,
+                            selected && styles.freqChipSelected,
+                          ]}
+                        >
+                          <Text
+                            style={
+                              selected
+                                ? styles.freqChipLabelSelected
+                                : styles.freqChipLabel
+                            }
+                          >
+                            {f === 'weekly'
+                              ? 'Weekly'
+                              : f === 'monthly'
+                                ? 'Monthly'
+                                : 'Yearly'}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {freq === 'weekly' ? (
+                    /* Day-of-week multi-picker. 7 chips, tap to toggle
+                       that weekday in/out of `byDay`. Empty selection
+                       saves as no `byDay` (helper falls back to the
+                       base block's weekday). */
+                    <View style={styles.dayChipRow} testID="byday-chips">
                     {WEEKDAY_LABELS.map((label, dayIdx) => {
                       const selected = byDay.includes(dayIdx);
                       return (
@@ -1058,9 +1133,12 @@ export function AddItemSheet({ visible, selectedDate, editing, onClose, onSaved 
                         </Pressable>
                       );
                     })}
-                  </View>
+                    </View>
+                  ) : null}
 
-                  {/* Optional end-of-series date. */}
+                  {/* Optional end-of-series date. Same widget for all
+                      three freqs — "Ends on a date" caps the series
+                      whether it's weekly, monthly, or yearly. */}
                   <Pressable
                     onPress={() => {
                       if (until) {
@@ -1412,6 +1490,29 @@ const styles = StyleSheet.create({
   },
   dayChipLabel: { fontSize: 13, color: '#444' },
   dayChipLabelSelected: { fontSize: 13, color: '#fff', fontWeight: '600' },
+  // Freq picker (Weekly / Monthly / Yearly) — same visual shape as
+  // EventSheet's freqRow for consistency across the two sheets'
+  // recurrence sections.
+  freqRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  freqChip: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+  },
+  freqChipSelected: {
+    borderColor: '#111',
+    backgroundColor: '#111',
+  },
+  freqChipLabel: { fontSize: 13, color: '#444' },
+  freqChipLabelSelected: { fontSize: 13, color: '#fff', fontWeight: '600' },
   // Row holding the until-date label + DatePicker. Visually mirrors the
   // existing Starts/Ends rows higher in the form so the recurrence
   // section feels of-a-piece with the time pickers.
