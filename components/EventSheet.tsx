@@ -203,6 +203,13 @@ export function EventSheet({
   const [albumItems, setAlbumItems] = useState<EventMediaItem[]>([]);
   const [albumLoading, setAlbumLoading] = useState<boolean>(false);
   const [albumUploading, setAlbumUploading] = useState<boolean>(false);
+  // Progress feedback during a multi-photo upload. `[done, total]`
+  // with both numbers === total when finished. null when not
+  // actively uploading. Drives the button label
+  // ("Uploading 3 of 5…") so the user sees the batch progressing.
+  const [albumUploadProgress, setAlbumUploadProgress] = useState<
+    [number, number] | null
+  >(null);
 
   // Default times for a NEW event: 6pm–9pm on the default date — a
   // reasonable host-side guess for "plan something with friends".
@@ -334,20 +341,45 @@ export function EventSheet({
       }
       const picked = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        // Multi-select: the user can pick up to 20 photos in one go.
+        // Each asset uploads sequentially (parallel uploads would
+        // saturate the Storage write limit on hobby tier and the
+        // FormData / fetch path doesn't pool well). 20 is a generous
+        // cap; well under any realistic ceiling and keeps the album
+        // refetch + UI scrolling responsive after the batch lands.
+        allowsMultipleSelection: true,
+        selectionLimit: 20,
         allowsEditing: false,
         quality: 1, // we re-compress in uploadEventPhoto
       });
       if (picked.canceled || picked.assets.length === 0) return;
-      const uri = picked.assets[0].uri;
+      const uris = picked.assets.map((a) => a.uri);
       setAlbumUploading(true);
-      const { error } = await uploadEventPhoto({ eventId: editing.id, uri });
-      if (error) {
-        toast.error(error);
-        return;
+      setAlbumUploadProgress([0, uris.length]);
+      // Sequential upload so the per-photo progress label tells the
+      // user how far along the batch is. If any single upload fails
+      // we toast it and continue with the rest — partial success is
+      // better than aborting a 10-photo batch on a 4th-photo network
+      // blip. The final refetch surfaces whatever DID land.
+      let firstError: string | null = null;
+      let succeeded = 0;
+      for (let i = 0; i < uris.length; i++) {
+        const { error } = await uploadEventPhoto({
+          eventId: editing.id,
+          uri: uris[i],
+        });
+        if (error) {
+          if (!firstError) firstError = error;
+        } else {
+          succeeded++;
+        }
+        setAlbumUploadProgress([i + 1, uris.length]);
       }
-      await refetchAlbum();
+      if (firstError) toast.error(firstError);
+      if (succeeded > 0) await refetchAlbum();
     } finally {
       setAlbumUploading(false);
+      setAlbumUploadProgress(null);
     }
   }
 
@@ -719,7 +751,12 @@ export function EventSheet({
                         ]}
                       >
                         <Text style={styles.albumAddLabel}>
-                          {albumUploading ? 'Uploading…' : '+ Add photo'}
+                          {albumUploading
+                            ? albumUploadProgress &&
+                              albumUploadProgress[1] > 1
+                              ? `Uploading ${albumUploadProgress[0]} of ${albumUploadProgress[1]}…`
+                              : 'Uploading…'
+                            : '+ Add photos'}
                         </Text>
                       </Pressable>
                     </View>
