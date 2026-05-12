@@ -1285,6 +1285,116 @@ describe('AddItemSheet', () => {
 
       alertSpy.mockRestore();
     });
+
+    describe('monthly + yearly (PR C)', () => {
+      it('shows a Weekly / Monthly / Yearly freq picker when Repeats is on', () => {
+        render(<AddItemSheet {...baseProps} />);
+        expect(screen.queryByTestId('busy-freq-row')).toBeNull();
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        expect(screen.getByTestId('busy-freq-row')).toBeOnTheScreen();
+        expect(screen.getByTestId('busy-freq-weekly')).toBeOnTheScreen();
+        expect(screen.getByTestId('busy-freq-monthly')).toBeOnTheScreen();
+        expect(screen.getByTestId('busy-freq-yearly')).toBeOnTheScreen();
+        // Defaults to weekly so the existing v1 behavior still kicks
+        // in for users who don't touch the freq picker.
+        expect(
+          screen.getByTestId('busy-freq-weekly').props.accessibilityState.checked,
+        ).toBe(true);
+      });
+
+      it('hides the byDay chips when freq is monthly', () => {
+        render(<AddItemSheet {...baseProps} />);
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        expect(screen.getByTestId('byday-chips')).toBeOnTheScreen();
+        fireEvent.press(screen.getByTestId('busy-freq-monthly'));
+        // byDay is weekly-only — it would be a no-op on a monthly
+        // rule, and the helper ignores it on monthly anyway.
+        expect(screen.queryByTestId('byday-chips')).toBeNull();
+      });
+
+      it('hides the byDay chips when freq is yearly', () => {
+        render(<AddItemSheet {...baseProps} />);
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        fireEvent.press(screen.getByTestId('busy-freq-yearly'));
+        expect(screen.queryByTestId('byday-chips')).toBeNull();
+      });
+
+      it('saves a monthly recurrenceRule when Monthly is selected', async () => {
+        mockedCreateBusy.mockResolvedValue({ error: null });
+        render(<AddItemSheet {...baseProps} />);
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        fireEvent.press(screen.getByTestId('busy-freq-monthly'));
+        fireEvent.press(screen.getByLabelText('Save'));
+        await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+        // No byDay on monthly — the rule is just {freq: 'monthly'}.
+        expect(mockedCreateBusy.mock.calls[0][0].recurrenceRule).toEqual({
+          freq: 'monthly',
+        });
+      });
+
+      it('saves a yearly recurrenceRule when Yearly is selected', async () => {
+        mockedCreateBusy.mockResolvedValue({ error: null });
+        render(<AddItemSheet {...baseProps} />);
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        fireEvent.press(screen.getByTestId('busy-freq-yearly'));
+        fireEvent.press(screen.getByLabelText('Save'));
+        await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+        expect(mockedCreateBusy.mock.calls[0][0].recurrenceRule).toEqual({
+          freq: 'yearly',
+        });
+      });
+
+      it('saves a monthly unavailable_day recurrenceRule', async () => {
+        mockedCreateUnavail.mockResolvedValue({ error: null });
+        render(<AddItemSheet {...baseProps} />);
+        fireEvent.press(screen.getByTestId('kind-unavailable'));
+        fireEvent.changeText(
+          screen.getByPlaceholderText('Title (optional)'),
+          'Out',
+        );
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        fireEvent.press(screen.getByTestId('busy-freq-monthly'));
+        fireEvent.press(screen.getByLabelText('Save'));
+        await waitFor(() => expect(mockedCreateUnavail).toHaveBeenCalled());
+        expect(mockedCreateUnavail.mock.calls[0][0].recurrenceRule).toEqual({
+          freq: 'monthly',
+        });
+      });
+
+      it('combines freq + until on save', async () => {
+        mockedCreateBusy.mockResolvedValue({ error: null });
+        render(<AddItemSheet {...baseProps} />);
+        fireEvent.press(screen.getByTestId('repeat-weekly-toggle'));
+        fireEvent.press(screen.getByTestId('busy-freq-yearly'));
+        fireEvent.press(screen.getByTestId('until-toggle'));
+        fireEvent.press(screen.getByLabelText('Save'));
+        await waitFor(() => expect(mockedCreateBusy).toHaveBeenCalled());
+        const rule = mockedCreateBusy.mock.calls[0][0].recurrenceRule;
+        expect(rule?.freq).toBe('yearly');
+        expect(typeof rule?.until).toBe('string');
+      });
+
+      it('edit mode pre-fills the freq picker from the editing item', () => {
+        const editing: CalendarItem = {
+          kind: 'busy_block',
+          id: 'series1',
+          user: me,
+          startsAt: new Date(2026, 4, 15, 14, 0),
+          endsAt: new Date(2026, 4, 15, 15, 0),
+          title: 'Book club',
+          notes: null,
+          location: null,
+          recurrenceRule: { freq: 'monthly' },
+        };
+        render(<AddItemSheet {...baseProps} editing={editing} />);
+        fireEvent.press(screen.getByTestId('event-edit'));
+        expect(
+          screen.getByTestId('busy-freq-monthly').props.accessibilityState.checked,
+        ).toBe(true);
+        // byDay chips don't render for a monthly rule.
+        expect(screen.queryByTestId('byday-chips')).toBeNull();
+      });
+    });
   });
 
   it('saves an unavailable_day with the selectedDate and title (notes null when blank)', async () => {
