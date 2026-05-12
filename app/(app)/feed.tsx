@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { PostComments } from '../../components/PostComments';
 import { useAuth } from '../../lib/auth';
 import { createPost, deletePost, listFeedPosts } from '../../lib/post-actions';
 import type { PostItem } from '../../lib/post-actions';
@@ -50,6 +51,11 @@ export default function FeedScreen() {
   // text affordance; posts are short by design.
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // P4c: which posts have their inline comment thread expanded.
+  // Multiple can be open at once — the user might scroll between
+  // threads. A Set is cheap to add / remove without re-allocating
+  // the whole identity.
+  const [expandedPosts, setExpandedPosts] = useState<Set<string>>(() => new Set());
 
   const fetchFeed = useCallback(async () => {
     const { data, error } = await listFeedPosts();
@@ -194,6 +200,48 @@ export default function FeedScreen() {
                   </Text>
                 </View>
                 <Text style={styles.postBody}>{post.body}</Text>
+
+                {/* P4c: Comments toggle + inline thread. Tapping
+                    expands / collapses; expanded threads fetch their
+                    own comments via the PostComments sub-component
+                    (each thread owns its own state so the feed
+                    screen doesn't have to maintain per-post maps). */}
+                <Pressable
+                  testID={`feed-comments-toggle-${post.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    expandedPosts.has(post.id)
+                      ? 'Hide comments'
+                      : 'Show comments'
+                  }
+                  onPress={() => {
+                    setExpandedPosts((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(post.id)) next.delete(post.id);
+                      else next.add(post.id);
+                      return next;
+                    });
+                  }}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.commentsToggle,
+                    pressed && styles.commentsTogglePressed,
+                  ]}
+                >
+                  <Text style={styles.commentsToggleLabel}>
+                    {expandedPosts.has(post.id) ? 'Hide comments' : '💬 Comment'}
+                  </Text>
+                </Pressable>
+
+                {expandedPosts.has(post.id) ? (
+                  <PostComments
+                    postId={post.id}
+                    postAuthorId={post.author.id}
+                    currentUserId={session?.user.id}
+                    composeColor={composeColor}
+                  />
+                ) : null}
+
                 {isMine ? (
                   <Pressable
                     testID={`feed-delete-${post.id}`}
@@ -277,6 +325,16 @@ const styles = StyleSheet.create({
   postAuthor: { flex: 1, fontSize: 14, fontWeight: '600', color: '#111' },
   postTime: { fontSize: 12, color: '#888' },
   postBody: { fontSize: 14, color: '#222', lineHeight: 20 },
+  // Inline "Comment" / "Hide comments" button. Aligned with the
+  // post body's left edge so the affordance hangs off the bottom
+  // of the row without competing visually with the body itself.
+  commentsToggle: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 2,
+  },
+  commentsTogglePressed: { opacity: 0.5 },
+  commentsToggleLabel: { fontSize: 12, color: '#555', fontWeight: '500' },
   // The trash icon floats in the top-right of the user's own posts
   // so it doesn't compete with the author / timestamp row.
   deleteButton: {
