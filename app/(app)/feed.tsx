@@ -1,7 +1,9 @@
+import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -52,6 +54,11 @@ export default function FeedScreen() {
   // text affordance; posts are short by design.
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // P4e: optional photo attached to a new post. The compose row
+  // shows a thumbnail preview when set; "× " on the preview clears
+  // it. Stored as a local URI from expo-image-picker until the user
+  // taps Post, at which point createPost uploads + persists.
+  const [pendingMediaUri, setPendingMediaUri] = useState<string | null>(null);
   // P4c: which posts have their inline comment thread expanded.
   // Multiple can be open at once — the user might scroll between
   // threads. A Set is cheap to add / remove without re-allocating
@@ -85,19 +92,40 @@ export default function FeedScreen() {
   }
 
   async function handlePost() {
-    if (submitting || body.trim().length === 0) return;
+    // Post is valid when there's text OR a pending photo.
+    if (submitting || (body.trim().length === 0 && !pendingMediaUri)) return;
     setSubmitting(true);
     try {
-      const { error } = await createPost({ body });
+      const { error } = await createPost({
+        body,
+        mediaUri: pendingMediaUri ?? undefined,
+      });
       if (error) {
         toast.error(error);
         return;
       }
       setBody('');
+      setPendingMediaUri(null);
       await fetchFeed();
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function handlePickPhoto() {
+    // Permission first — matches the upload flow on the EventSheet.
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      toast.error('Photo library access is needed to attach a photo.');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 1, // createPost re-compresses
+    });
+    if (picked.canceled || picked.assets.length === 0) return;
+    setPendingMediaUri(picked.assets[0].uri);
   }
 
   async function handleToggleLike(post: PostItem) {
@@ -165,8 +193,10 @@ export default function FeedScreen() {
     <View style={styles.container}>
       {/* Compose box — always rendered at the top of the feed,
           even when the list is empty. Keeps the affordance
-          discoverable without a separate "create" surface. */}
-      <View style={styles.composeRow} testID="compose-row">
+          discoverable without a separate "create" surface.
+          P4e: optional pending-photo preview sits below the text
+          input + above the action row. */}
+      <View style={styles.composeWrap} testID="compose-row">
         <TextInput
           testID="compose-input"
           placeholder="Share something with friends…"
@@ -177,23 +207,65 @@ export default function FeedScreen() {
           multiline
           maxLength={1000}
         />
-        <Pressable
-          testID="compose-post"
-          accessibilityRole="button"
-          accessibilityLabel="Post"
-          onPress={handlePost}
-          disabled={submitting || body.trim().length === 0}
-          style={({ pressed }) => [
-            styles.composeButton,
-            { backgroundColor: composeColor },
-            pressed && styles.composeButtonPressed,
-            (submitting || body.trim().length === 0) && styles.composeButtonDisabled,
-          ]}
-        >
-          <Text style={styles.composeButtonLabel}>
-            {submitting ? '…' : 'Post'}
-          </Text>
-        </Pressable>
+        {pendingMediaUri ? (
+          <View style={styles.pendingMediaRow} testID="compose-pending-media">
+            <Image
+              source={{ uri: pendingMediaUri }}
+              style={styles.pendingMediaImage}
+              resizeMode="cover"
+            />
+            <Pressable
+              testID="compose-remove-media"
+              accessibilityRole="button"
+              accessibilityLabel="Remove photo"
+              onPress={() => setPendingMediaUri(null)}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.pendingMediaRemove,
+                pressed && styles.pendingMediaRemovePressed,
+              ]}
+            >
+              <Text style={styles.pendingMediaRemoveLabel}>×</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        <View style={styles.composeActionRow}>
+          <Pressable
+            testID="compose-pick-photo"
+            accessibilityRole="button"
+            accessibilityLabel="Attach a photo"
+            onPress={handlePickPhoto}
+            disabled={submitting}
+            hitSlop={6}
+            style={({ pressed }) => [
+              styles.composePickButton,
+              pressed && styles.composePickButtonPressed,
+              submitting && styles.composePickButtonDisabled,
+            ]}
+          >
+            <Text style={styles.composePickLabel}>📷 Photo</Text>
+          </Pressable>
+          <Pressable
+            testID="compose-post"
+            accessibilityRole="button"
+            accessibilityLabel="Post"
+            onPress={handlePost}
+            disabled={
+              submitting || (body.trim().length === 0 && !pendingMediaUri)
+            }
+            style={({ pressed }) => [
+              styles.composeButton,
+              { backgroundColor: composeColor },
+              pressed && styles.composeButtonPressed,
+              (submitting || (body.trim().length === 0 && !pendingMediaUri)) &&
+                styles.composeButtonDisabled,
+            ]}
+          >
+            <Text style={styles.composeButtonLabel}>
+              {submitting ? '…' : 'Post'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       {loading ? (
@@ -237,7 +309,17 @@ export default function FeedScreen() {
                     {formatRelative(post.createdAt, now)}
                   </Text>
                 </View>
-                <Text style={styles.postBody}>{post.body}</Text>
+                {post.body ? (
+                  <Text style={styles.postBody}>{post.body}</Text>
+                ) : null}
+                {post.mediaUrl ? (
+                  <Image
+                    testID={`feed-post-media-${post.id}`}
+                    source={{ uri: post.mediaUrl }}
+                    style={styles.postMedia}
+                    resizeMode="cover"
+                  />
+                ) : null}
 
                 <View style={styles.actionRow}>
                   {/* P4d: heart toggle. Optimistic-update — the
@@ -343,25 +425,37 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  composeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+  composeWrap: {
     padding: 12,
     gap: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#eee',
   },
   composeInput: {
-    flex: 1,
     minHeight: 40,
     maxHeight: 120,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: '#f7f7f7',
     fontSize: 14,
     color: '#111',
   },
+  composeActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  composePickButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  composePickButtonPressed: { opacity: 0.6 },
+  composePickButtonDisabled: { opacity: 0.4 },
+  composePickLabel: { fontSize: 13, color: '#444', fontWeight: '500' },
   composeButton: {
     paddingHorizontal: 16,
     height: 40,
@@ -372,6 +466,32 @@ const styles = StyleSheet.create({
   composeButtonPressed: { opacity: 0.7 },
   composeButtonDisabled: { opacity: 0.4 },
   composeButtonLabel: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  // Pending-photo preview shown between the text input and the
+  // action row when the user has picked a photo but hasn't posted
+  // yet. Square thumbnail + an × in the top-right to clear it.
+  pendingMediaRow: {
+    position: 'relative',
+    alignSelf: 'flex-start',
+  },
+  pendingMediaImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: '#eee',
+  },
+  pendingMediaRemove: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#111',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingMediaRemovePressed: { opacity: 0.6 },
+  pendingMediaRemoveLabel: { color: '#fff', fontSize: 16, lineHeight: 18 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyWrap: {
     flex: 1,
@@ -400,6 +520,17 @@ const styles = StyleSheet.create({
   postAuthor: { flex: 1, fontSize: 14, fontWeight: '600', color: '#111' },
   postTime: { fontSize: 12, color: '#888' },
   postBody: { fontSize: 14, color: '#222', lineHeight: 20 },
+  // Attached photo on a post row (P4e). Fills the row width minus
+  // the row's horizontal padding + the left-border width; aspect
+  // ratio kept square for now, with cover crop so portrait + landscape
+  // both look intentional. Tap-to-fullscreen viewer is a follow-up.
+  postMedia: {
+    marginTop: 6,
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 6,
+    backgroundColor: '#eee',
+  },
   // Horizontal row holding the heart toggle + comments toggle —
   // sits below the post body, before the optional inline thread.
   actionRow: {
