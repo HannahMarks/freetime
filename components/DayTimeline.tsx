@@ -14,6 +14,7 @@ import {
   shiftBlockByMinutes,
   UnavailableDayItem,
 } from '../lib/calendar-helpers';
+import type { EventItem } from '../lib/event-helpers';
 import { tickSnap } from '../lib/haptics';
 
 const HOUR_HEIGHT = 32;
@@ -29,6 +30,20 @@ type Props = {
    * are clipped to this day's window. */
   date: string;
   items: CalendarItem[];
+  /** Events overlapping this day. Rendered as a third overlay layer on
+   * top of the hour grid, with the same time-based positioning logic
+   * as busy_blocks, but painted in `eventColor` so the viewer can
+   * distinguish "my event" from "a friend is busy". Multi-day events
+   * clip to the day window like multi-day busy_blocks do. Tapping a
+   * block fires `onEventPress` with the full EventItem. */
+  events?: EventItem[];
+  /** Pre-darkened color for the event blocks. Calendar tab passes
+   * `darkenHexColor(profile.color, EVENT_DARKEN_AMOUNT)` so the
+   * timeline block, the month-grid event dot, and the Events sub-FAB
+   * outline all paint the same hue. Required when `events` is
+   * non-empty; otherwise unused (so tests that don't care can skip
+   * it). */
+  eventColor?: string;
   /** id of the signed-in user. Owned busy_blocks become draggable; others
    * remain tap-only. */
   currentUserId?: string;
@@ -39,6 +54,10 @@ type Props = {
   refreshControl?: ReactElement<RefreshControlProps>;
   /** Tap handler for any item — banner or block. */
   onItemPress?: (item: CalendarItem) => void;
+  /** Tap handler for an event block. Separate from `onItemPress`
+   * because events flow into the EventSheet, not the AddItemSheet
+   * the regular calendar items use. */
+  onEventPress?: (event: EventItem) => void;
   /** Drag-release handler for an owned busy_block. Fires once the user
    * lifts their finger after a long-press + pan. start/end are already
    * snapped to 15-minute increments and shifted equally so duration is
@@ -75,9 +94,12 @@ function hexAlpha(hex: string, alpha: number): string {
 export function DayTimeline({
   date,
   items,
+  events,
+  eventColor,
   currentUserId,
   refreshControl,
   onItemPress,
+  onEventPress,
   onItemReschedule,
 }: Props) {
   const blocks = items.filter((i): i is BusyBlockItem => i.kind === 'busy_block');
@@ -135,6 +157,49 @@ export function DayTimeline({
             <View style={styles.hourLine} />
           </View>
         ))}
+
+        {/* Event overlays. Same time-based positioning as busy_blocks
+            (clipped to the day window) but painted in `eventColor` so
+            they read as visually distinct without clashing with friend
+            colors. Drawn BEFORE busy_blocks in the JSX so a busy_block
+            at the same time renders on top (the user's own busy
+            indicators stay legible even when an event overlaps).
+            Tap → `onEventPress` so the parent can open the EventSheet
+            (host gets pencil + trash; invitee gets RSVP pills). */}
+        {(events ?? []).map((event) => {
+          const visibleStart = Math.max(event.startsAt.getTime(), dayStart);
+          const visibleEnd = Math.min(event.endsAt.getTime(), dayEnd);
+          if (visibleEnd <= visibleStart) return null;
+          const startHour = (visibleStart - dayStart) / MS_PER_HOUR;
+          const endHour = (visibleEnd - dayStart) / MS_PER_HOUR;
+          const top = startHour * HOUR_HEIGHT;
+          const height = Math.max((endHour - startHour) * HOUR_HEIGHT, 24);
+          const tint = eventColor ?? '#111';
+          return (
+            <Pressable
+              key={`${event.id}:${event.startsAt.getTime()}`}
+              testID={`day-event-${event.id}`}
+              onPress={onEventPress ? () => onEventPress(event) : undefined}
+              style={({ pressed }) => [
+                styles.eventBlock,
+                {
+                  top,
+                  height,
+                  borderLeftColor: tint,
+                  backgroundColor: hexAlpha(tint, 0.18),
+                },
+                pressed && styles.eventBlockPressed,
+              ]}
+            >
+              <Text style={styles.eventLabel} numberOfLines={1}>
+                {event.owner.display_name} · {event.title ?? 'Untitled event'}
+              </Text>
+              <Text style={styles.eventTime} numberOfLines={1}>
+                {formatTimeRange(event.startsAt, event.endsAt)}
+              </Text>
+            </Pressable>
+          );
+        })}
 
         {/* Busy block overlays — clipped to `date`'s 24h window. A block
             that started yesterday and ends tomorrow renders from 0 to 24
@@ -384,4 +449,23 @@ const styles = StyleSheet.create({
   blockTitle: { fontSize: 12, fontWeight: '600', color: '#111' },
   blockTime: { fontSize: 10, color: '#444', marginTop: 2 },
   blockTimeDragging: { fontWeight: '700', color: '#111' },
+  // Event blocks reuse `block` layout (same position math, same
+  // padding) so the math in the JSX stays identical between
+  // busy_blocks and events. Kept as a separate style so future
+  // event-specific styling (a darker text color, an icon, etc.)
+  // doesn't have to touch the busy_block path.
+  eventBlock: {
+    position: 'absolute',
+    left: HOUR_LABEL_WIDTH + 4,
+    right: 8,
+    borderLeftWidth: 4,
+    borderRadius: 4,
+    padding: 6,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+  },
+  eventBlockPressed: { opacity: 0.7 },
+  eventLabel: { fontSize: 12, fontWeight: '600', color: '#111' },
+  eventTime: { fontSize: 10, color: '#444', marginTop: 2 },
 });
