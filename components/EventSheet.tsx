@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -37,6 +38,11 @@ import {
   type EventItem,
   summarizeEventRecurrence,
 } from '../lib/event-helpers';
+import {
+  type EventMediaItem,
+  listEventMedia,
+  uploadEventPhoto,
+} from '../lib/event-media-actions';
 import type { RecurrenceFreq, RecurrenceRule } from '../lib/recurrence';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
@@ -189,6 +195,14 @@ export function EventSheet({
   const [repeats, setRepeats] = useState<boolean>(false);
   const [freq, setFreq] = useState<RecurrenceFreq>('weekly');
   const [until, setUntil] = useState<string | null>(null);
+  // Phase 3 P2a: photo album. Fetched on open when `editing` is set;
+  // never fetched in CREATE mode (no event id yet). `albumUploading`
+  // is a separate flag from `submitting` so the disabled state of
+  // the Add Photo button doesn't disable Save / Delete during an
+  // upload (and vice versa).
+  const [albumItems, setAlbumItems] = useState<EventMediaItem[]>([]);
+  const [albumLoading, setAlbumLoading] = useState<boolean>(false);
+  const [albumUploading, setAlbumUploading] = useState<boolean>(false);
 
   // Default times for a NEW event: 6pm–9pm on the default date — a
   // reasonable host-side guess for "plan something with friends".
@@ -263,6 +277,10 @@ export function EventSheet({
       setRepeats(editingRule != null);
       setFreq(editingRule?.freq ?? 'weekly');
       setUntil(editingRule?.until ?? null);
+      // Reset album state. The fetch fires from a separate effect
+      // (below) so that albumItems update independently when the
+      // user adds a new photo without re-running this whole block.
+      setAlbumItems([]);
     }
   }, [visible, editing, defaultDate]);
 
@@ -273,6 +291,64 @@ export function EventSheet({
     const rule: RecurrenceRule = { freq };
     if (until) rule.until = until;
     return rule;
+  }
+
+  /** Fetch the album for the editing event. Wrapped in useCallback
+   * so the handler that fires after an upload can reuse the same
+   * function reference. Bails when there's no editing event
+   * (CREATE mode — no id yet). */
+  const refetchAlbum = useCallback(async () => {
+    if (!editing) return;
+    setAlbumLoading(true);
+    try {
+      const { data, error } = await listEventMedia({ eventId: editing.id });
+      if (error) {
+        // The album is a secondary surface — toast but don't block
+        // the rest of the sheet from rendering.
+        toast.error(error);
+        return;
+      }
+      if (data) setAlbumItems(data);
+    } finally {
+      setAlbumLoading(false);
+    }
+  }, [editing]);
+
+  useEffect(() => {
+    if (visible && editing) {
+      refetchAlbum();
+    }
+  }, [visible, editing, refetchAlbum]);
+
+  /** Add-photo handler. Launches the image picker, then hands the
+   * resulting URI off to `uploadEventPhoto` (which does the
+   * compress + storage upload + metadata insert). On success the
+   * album refetches so the new photo appears. */
+  async function handleAddPhoto() {
+    if (!editing || albumUploading) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        toast.error('Photo library access is needed to upload.');
+        return;
+      }
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 1, // we re-compress in uploadEventPhoto
+      });
+      if (picked.canceled || picked.assets.length === 0) return;
+      const uri = picked.assets[0].uri;
+      setAlbumUploading(true);
+      const { error } = await uploadEventPhoto({ eventId: editing.id, uri });
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      await refetchAlbum();
+    } finally {
+      setAlbumUploading(false);
+    }
   }
 
   // Swipe-down dismiss — same gesture pattern as AddItemSheet (see
@@ -611,6 +687,41 @@ export function EventSheet({
                           )
                           .join(', ')}
                       </Text>
+                    </View>
+                  ) : null}
+                  {/* Album section (Phase 3 P2a). Visible to event
+                      attendees only — host OR an accepted invitee.
+                      Pending / declined / maybe invitees can't add
+                      photos, matching the storage.objects RLS.
+                      For now we show just the count + an "Add photo"
+                      button; the grid view + full-screen pager
+                      ship in P2b. */}
+                  {editing && (isHost || myRsvp?.status === 'accepted') ? (
+                    <View style={styles.viewRow} testID="album-section">
+                      <Text style={styles.viewLabel}>Album</Text>
+                      <Text style={styles.viewValue} testID="album-count">
+                        {albumLoading
+                          ? 'Loading…'
+                          : albumItems.length === 0
+                            ? 'No photos yet'
+                            : `${albumItems.length} ${albumItems.length === 1 ? 'photo' : 'photos'}`}
+                      </Text>
+                      <Pressable
+                        onPress={handleAddPhoto}
+                        accessibilityRole="button"
+                        accessibilityLabel="Add photo"
+                        disabled={albumUploading}
+                        testID="album-add-photo"
+                        style={({ pressed }) => [
+                          styles.albumAddButton,
+                          pressed && styles.albumAddButtonPressed,
+                          albumUploading && styles.albumAddButtonDisabled,
+                        ]}
+                      >
+                        <Text style={styles.albumAddLabel}>
+                          {albumUploading ? 'Uploading…' : '+ Add photo'}
+                        </Text>
+                      </Pressable>
                     </View>
                   ) : null}
                   {/* Invitee RSVP pills. Visible only when the user
@@ -1142,6 +1253,22 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 4,
   },
+  // Album "+ Add photo" button. Outline-style rounded pill in a
+  // neutral dark — kept distinct from the filled Save / RSVP
+  // buttons so the affordance reads as secondary (the album is a
+  // side-feature, not the primary event action).
+  albumAddButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#111',
+    marginTop: 4,
+  },
+  albumAddButtonPressed: { opacity: 0.6 },
+  albumAddButtonDisabled: { opacity: 0.45 },
+  albumAddLabel: { fontSize: 13, color: '#111', fontWeight: '600' },
   // Invitee RSVP pills. Three side-by-side rounded buttons; the
   // currently-selected one fills (dark bg + white text) for an
   // unambiguous "this is my RSVP" affordance.
