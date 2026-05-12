@@ -37,6 +37,7 @@ import {
   mergeMarkings,
   monthRange,
 } from '../../lib/calendar-helpers';
+import { darkenHexColor } from '../../lib/color-helpers';
 import { listEvents } from '../../lib/event-actions';
 import type { EventItem } from '../../lib/event-helpers';
 import { listFriendships } from '../../lib/friend-actions';
@@ -116,6 +117,11 @@ export default function CalendarScreen() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarItem | null>(null);
   const [eventSheetOpen, setEventSheetOpen] = useState(false);
+  // When the user taps an event block on the day timeline, the
+  // EventSheet opens on this row in view mode (read-only for
+  // invitees, with host controls for the owner). null in create mode
+  // (FAB → Event sub-FAB).
+  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
 
   const fetchMonth = useCallback(async () => {
     const { fromDate, toDate } = monthRange(month.year, month.monthIndex);
@@ -368,8 +374,17 @@ export default function CalendarScreen() {
         <SwipeableDayCarousel
           date={selectedDate}
           items={items}
+          events={events}
+          // Same hue as the month-grid event dot + Events sub-FAB
+          // outline — `darkenHexColor` is pure + cheap so we let it
+          // recompute per render; React.memo would be overkill here.
+          eventColor={darkenHexColor(profile?.color ?? '#111', EVENT_DARKEN_AMOUNT)}
           currentUserId={session?.user.id}
           onItemPress={handleItemPress}
+          onEventPress={(event) => {
+            setEditingEvent(event);
+            setEventSheetOpen(true);
+          }}
           onItemReschedule={handleItemReschedule}
           onDateChange={navigateToDate}
           refreshControl={
@@ -384,7 +399,13 @@ export default function CalendarScreen() {
           setEditing(null);
           setAddOpen(true);
         }}
-        onPressEvent={() => setEventSheetOpen(true)}
+        onPressEvent={() => {
+          // FAB → Event sub-FAB always opens in CREATE mode — clear
+          // any previously-tapped event so the sheet doesn't open
+          // pre-filled with the last viewed event.
+          setEditingEvent(null);
+          setEventSheetOpen(true);
+        }}
       />
 
       <AddItemSheet
@@ -398,10 +419,13 @@ export default function CalendarScreen() {
       <EventSheet
         visible={eventSheetOpen}
         defaultDate={selectedDate}
-        editing={null}
+        editing={editingEvent}
         friends={friends}
         currentUserId={session?.user.id}
-        onClose={() => setEventSheetOpen(false)}
+        onClose={() => {
+          setEventSheetOpen(false);
+          setEditingEvent(null);
+        }}
         onSaved={fetchMonth}
       />
     </View>

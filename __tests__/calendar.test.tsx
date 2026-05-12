@@ -78,8 +78,11 @@ jest.mock('../components/SwipeableDayCarousel', () => {
     SwipeableDayCarousel: (props: {
       date: string;
       items: unknown[];
+      events?: unknown[];
+      eventColor?: string;
       currentUserId?: string;
       onItemPress?: unknown;
+      onEventPress?: unknown;
       onItemReschedule?: unknown;
       refreshControl?: unknown;
     }) => {
@@ -87,8 +90,11 @@ jest.mock('../components/SwipeableDayCarousel', () => {
       return React.createElement(DayTimeline, {
         date: props.date,
         items: dayItems,
+        events: props.events,
+        eventColor: props.eventColor,
         currentUserId: props.currentUserId,
         onItemPress: props.onItemPress,
+        onEventPress: props.onEventPress,
         onItemReschedule: props.onItemReschedule,
         refreshControl: props.refreshControl,
       });
@@ -568,6 +574,67 @@ describe('CalendarScreen', () => {
 
       fireEvent.press(screen.getByLabelText('Close'));
       await waitFor(() => expect(screen.queryByTestId('event-sheet')).toBeNull());
+    });
+
+    it('renders event blocks on the day timeline in the darker user color (H5c)', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      mockedListEvents.mockResolvedValue({
+        data: [
+          {
+            kind: 'event',
+            id: 'ev-on-tl',
+            owner: { id: 'me-id', display_name: 'Me', color: '#9C27B0' },
+            startsAt: new Date(2026, 4, 13, 18, 0),
+            endsAt: new Date(2026, 4, 13, 21, 0),
+            title: 'Birthday',
+            notes: null,
+            location: null,
+          },
+        ],
+        error: null,
+      });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      // Today is 2026-05-13 (the fake-timer system time) so the event
+      // is on the visible day. Block should render with the
+      // darkenHexColor of the profile color (#9C27B0 → ≈ #65198d).
+      const block = screen.getByTestId('day-event-ev-on-tl');
+      expect(block).toBeOnTheScreen();
+      // We don't assert the exact hex (covered in color-helpers.test) —
+      // just that the border color is NOT the un-darkened profile
+      // color, so a regression that bypasses the darken pipeline
+      // fails this check.
+      const style = Array.isArray(block.props.style)
+        ? Object.assign({}, ...block.props.style.filter(Boolean))
+        : block.props.style;
+      expect(String(style.borderLeftColor).toLowerCase()).not.toBe('#9c27b0');
+    });
+
+    it('opens the EventSheet in VIEW mode when an event block on the day timeline is tapped (H5c)', async () => {
+      mockedList.mockResolvedValue({ data: [], error: null });
+      const ev = {
+        kind: 'event' as const,
+        id: 'ev-tap',
+        owner: { id: 'me-id', display_name: 'Me', color: '#9C27B0' },
+        startsAt: new Date(2026, 4, 13, 18, 0),
+        endsAt: new Date(2026, 4, 13, 21, 0),
+        title: 'Birthday',
+        notes: null,
+        location: null,
+      };
+      mockedListEvents.mockResolvedValue({ data: [ev], error: null });
+      render(<CalendarScreen />);
+      await flushAsync();
+
+      expect(screen.queryByTestId('event-sheet')).toBeNull();
+      fireEvent.press(screen.getByTestId('day-event-ev-tap'));
+      expect(screen.getByTestId('event-sheet')).toBeOnTheScreen();
+      // View mode shows the title as the heading and a non-null
+      // view-date row — proves we're in view mode, not the blank
+      // create form.
+      expect(screen.getByText('Birthday')).toBeOnTheScreen();
+      expect(screen.getByTestId('view-date')).toBeOnTheScreen();
     });
 
     it("opens the sheet in view mode when the user taps their own item (no action sheet)", async () => {

@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 import { DayTimeline } from '../components/DayTimeline';
 import { CalendarItem } from '../lib/calendar-helpers';
+import type { EventItem } from '../lib/event-helpers';
 
 const alice = { id: 'a', display_name: 'Alice', color: '#FF6B6B' };
 const bob = { id: 'b', display_name: 'Bob', color: '#4ECDC4' };
@@ -253,6 +254,178 @@ describe('DayTimeline', () => {
       };
       render(<DayTimeline date="2026-05-14" items={[overnight]} />);
       expect(screen.getByTestId('day-block-on1')).toHaveStyle({ top: 0, height: 32 });
+    });
+  });
+
+  describe('events overlay (H5c)', () => {
+    /** Pre-darkened event color — DayTimeline doesn't compute the
+     * darken itself; calendar.tsx passes the same value it uses for
+     * the month-grid dot, so the timeline block and the dot match. */
+    const EVENT_COLOR = '#6c1b78'; // ≈ darken('#9C27B0', 0.35)
+
+    function eventAt(start: Date, end: Date, title = 'Birthday'): EventItem {
+      return {
+        kind: 'event',
+        id: `ev-${start.getTime()}`,
+        owner: alice,
+        startsAt: start,
+        endsAt: end,
+        title,
+        notes: null,
+        location: null,
+      };
+    }
+
+    it('renders an event as a block at its time range', () => {
+      const event = eventAt(
+        new Date(2026, 4, 13, 18, 0),
+        new Date(2026, 4, 13, 21, 0),
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      const block = screen.getByTestId(`day-event-${event.id}`);
+      // 6pm = hour 18, height 3 hrs * 32 = 96, top = 18*32 = 576
+      expect(block).toHaveStyle({ top: 576, height: 96 });
+    });
+
+    it('paints the event block in the supplied (darkened) color', () => {
+      const event = eventAt(
+        new Date(2026, 4, 13, 18, 0),
+        new Date(2026, 4, 13, 21, 0),
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      const block = screen.getByTestId(`day-event-${event.id}`);
+      // Border + translucent fill in the event color so the FAB
+      // outline + month dot + timeline block all share one hue.
+      expect(block).toHaveStyle({ borderLeftColor: EVENT_COLOR });
+    });
+
+    it('shows the host name and title in the event block', () => {
+      const event = eventAt(
+        new Date(2026, 4, 13, 18, 0),
+        new Date(2026, 4, 13, 21, 0),
+        'Birthday',
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      // Format mirrors busy_block label: "Owner · Title".
+      expect(screen.getByText(/Alice · Birthday/)).toBeOnTheScreen();
+    });
+
+    it('falls back to "Untitled event" when the event has no title', () => {
+      const event = eventAt(
+        new Date(2026, 4, 13, 12, 0),
+        new Date(2026, 4, 13, 13, 0),
+      );
+      event.title = null;
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      expect(screen.getByText(/Alice · Untitled event/)).toBeOnTheScreen();
+    });
+
+    it('fires onEventPress when an event block is tapped', () => {
+      const onEventPress = jest.fn();
+      const event = eventAt(
+        new Date(2026, 4, 13, 18, 0),
+        new Date(2026, 4, 13, 21, 0),
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+          onEventPress={onEventPress}
+        />,
+      );
+      fireEvent.press(screen.getByTestId(`day-event-${event.id}`));
+      expect(onEventPress).toHaveBeenCalledTimes(1);
+      expect(onEventPress).toHaveBeenCalledWith(event);
+    });
+
+    it("does not render an event whose interval doesn't intersect the day", () => {
+      // Event is on May 14 entirely; timeline rendering May 13 should
+      // ignore it.
+      const event = eventAt(
+        new Date(2026, 4, 14, 18, 0),
+        new Date(2026, 4, 14, 21, 0),
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      expect(screen.queryByTestId(`day-event-${event.id}`)).toBeNull();
+    });
+
+    it('clips a multi-day event to the visible day window', () => {
+      // Starts May 12 at 22:00, ends May 13 at 10:00 — on May 13 it
+      // should render from 0:00 to 10:00 (top=0, height=10*32=320).
+      const event = eventAt(
+        new Date(2026, 4, 12, 22, 0),
+        new Date(2026, 4, 13, 10, 0),
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[event]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      const block = screen.getByTestId(`day-event-${event.id}`);
+      expect(block).toHaveStyle({ top: 0, height: 320 });
+    });
+
+    it('renders multiple events on the same day', () => {
+      const morning = eventAt(
+        new Date(2026, 4, 13, 10, 0),
+        new Date(2026, 4, 13, 11, 0),
+        'Brunch',
+      );
+      const evening = eventAt(
+        new Date(2026, 4, 13, 19, 0),
+        new Date(2026, 4, 13, 22, 0),
+        'Concert',
+      );
+      render(
+        <DayTimeline
+          date={DAY}
+          items={[]}
+          events={[morning, evening]}
+          eventColor={EVENT_COLOR}
+        />,
+      );
+      expect(screen.getByText(/Alice · Brunch/)).toBeOnTheScreen();
+      expect(screen.getByText(/Alice · Concert/)).toBeOnTheScreen();
     });
   });
 });

@@ -14,6 +14,7 @@ import {
   itemsOnDate,
   shiftDate,
 } from '../lib/calendar-helpers';
+import type { EventItem } from '../lib/event-helpers';
 import { DayTimeline } from './DayTimeline';
 
 // Match the week swipe wholesale ("think about it like the way you
@@ -31,6 +32,16 @@ type Props = {
   date: string;
   /** Full month's calendar items. The carousel slices per-day for each pane. */
   items: CalendarItem[];
+  /** Full month's events. Threaded straight through to every pane —
+   * each `DayTimeline` filters its own visible window via the
+   * `[startsAt, endsAt)` intersection check (multi-day events
+   * clip to the day window the same way busy_blocks do). */
+  events?: EventItem[];
+  /** Pre-darkened color for event blocks. Calendar tab passes
+   * `darkenHexColor(profile.color, EVENT_DARKEN_AMOUNT)` so the
+   * timeline block, the month-grid event dot, and the Events
+   * sub-FAB outline all share one hue. */
+  eventColor?: string;
   currentUserId?: string;
   /** Fires the moment a swipe-release commits past threshold — BEFORE the
    * slide animation finishes — so the parent's selectedDate (and the
@@ -40,6 +51,8 @@ type Props = {
    * plays cleanly to completion. */
   onDateChange: (newDate: string) => void;
   onItemPress?: (item: CalendarItem) => void;
+  /** Tap handler for an event block — flows into the EventSheet. */
+  onEventPress?: (event: EventItem) => void;
   onItemReschedule?: (item: BusyBlockItem, newStart: Date, newEnd: Date) => void;
   /** Pull-to-refresh control — only mounted on the centered pane. */
   refreshControl?: ReactElement<RefreshControlProps>;
@@ -73,9 +86,12 @@ type Props = {
 export function SwipeableDayCarousel({
   date,
   items,
+  events,
+  eventColor,
   currentUserId,
   onDateChange,
   onItemPress,
+  onEventPress,
   onItemReschedule,
   refreshControl,
 }: Props) {
@@ -213,8 +229,11 @@ export function SwipeableDayCarousel({
               key={prevDate}
               date={prevDate}
               items={prevItems}
+              events={events}
+              eventColor={eventColor}
               currentUserId={currentUserId}
               onItemPress={onItemPress}
+              onEventPress={onEventPress}
               onItemReschedule={onItemReschedule}
             />
           </View>
@@ -226,8 +245,11 @@ export function SwipeableDayCarousel({
               key={layoutDate}
               date={layoutDate}
               items={currItems}
+              events={events}
+              eventColor={eventColor}
               currentUserId={currentUserId}
               onItemPress={onItemPress}
+              onEventPress={onEventPress}
               onItemReschedule={onItemReschedule}
               refreshControl={refreshControl}
             />
@@ -237,8 +259,11 @@ export function SwipeableDayCarousel({
               key={nextDate}
               date={nextDate}
               items={nextItems}
+              events={events}
+              eventColor={eventColor}
               currentUserId={currentUserId}
               onItemPress={onItemPress}
+              onEventPress={onEventPress}
               onItemReschedule={onItemReschedule}
             />
           </View>
