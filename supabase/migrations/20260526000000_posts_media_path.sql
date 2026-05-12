@@ -15,6 +15,13 @@
 alter table public.posts
   add column media_path text;
 
+-- `body` was NOT NULL since P4a. Relax it so a media-only post can
+-- have body=null. The CHECK below preserves the "at least one of
+-- body / media must be present" invariant — losing NOT NULL alone
+-- without the CHECK would allow truly empty posts.
+alter table public.posts
+  alter column body drop not null;
+
 -- Drop the old body-required CHECK and replace with a broader one
 -- that admits media-only posts. Path is also length-gated so the
 -- column can't store empty strings.
