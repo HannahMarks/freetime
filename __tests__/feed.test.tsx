@@ -11,6 +11,11 @@ jest.mock('../lib/post-actions', () => ({
   deletePost: jest.fn(),
 }));
 
+jest.mock('../lib/like-actions', () => ({
+  likePost: jest.fn().mockResolvedValue({ error: null }),
+  unlikePost: jest.fn().mockResolvedValue({ error: null }),
+}));
+
 // PostComments transitively imports Supabase via comment-actions.
 // Stub it with a thin shim so feed tests don't have to mock the
 // whole comments stack — the component's own behavior is covered
@@ -88,6 +93,8 @@ describe('FeedScreen', () => {
           author: alice,
           body: 'Hi everyone',
           createdAt: fiveMinAgo,
+          likeCount: 0,
+          likedByMe: false,
         },
       ],
       error: null,
@@ -152,8 +159,8 @@ describe('FeedScreen', () => {
   it("shows a delete button only on the viewer's own posts", async () => {
     mockedList.mockResolvedValue({
       data: [
-        { id: 'p1', author: alice, body: 'from alice', createdAt: new Date() },
-        { id: 'p2', author: me, body: 'from me', createdAt: new Date() },
+        { id: 'p1', author: alice, body: 'from alice', createdAt: new Date(), likeCount: 0, likedByMe: false },
+        { id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false },
       ],
       error: null,
     });
@@ -165,7 +172,7 @@ describe('FeedScreen', () => {
 
   it('tap trash → Alert → destructive → calls deletePost + removes the row locally', async () => {
     mockedList.mockResolvedValue({
-      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date() }],
+      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false }],
       error: null,
     });
     mockedDelete.mockResolvedValue({ error: null });
@@ -185,7 +192,7 @@ describe('FeedScreen', () => {
 
   it('Alert "Cancel" does NOT call deletePost', async () => {
     mockedList.mockResolvedValue({
-      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date() }],
+      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false }],
       error: null,
     });
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, btns) => {
@@ -201,7 +208,7 @@ describe('FeedScreen', () => {
 
   it("toasts and doesn't remove the row when deletePost fails", async () => {
     mockedList.mockResolvedValue({
-      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date() }],
+      data: [{ id: 'p2', author: me, body: 'from me', createdAt: new Date(), likeCount: 0, likedByMe: false }],
       error: null,
     });
     mockedDelete.mockResolvedValue({
@@ -225,7 +232,7 @@ describe('FeedScreen', () => {
   describe('comments toggle (P4c)', () => {
     it('shows a "Comment" toggle on each post row, with the comments thread hidden by default', async () => {
       mockedList.mockResolvedValue({
-        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date() }],
+        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date(), likeCount: 0, likedByMe: false }],
         error: null,
       });
       render(<FeedScreen />);
@@ -238,7 +245,7 @@ describe('FeedScreen', () => {
 
     it('tapping the toggle expands the inline comments thread; tap again collapses', async () => {
       mockedList.mockResolvedValue({
-        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date() }],
+        data: [{ id: 'p1', author: alice, body: 'hi', createdAt: new Date(), likeCount: 0, likedByMe: false }],
         error: null,
       });
       render(<FeedScreen />);
@@ -252,8 +259,8 @@ describe('FeedScreen', () => {
     it('multiple posts can have their threads open at the same time', async () => {
       mockedList.mockResolvedValue({
         data: [
-          { id: 'p1', author: alice, body: 'one', createdAt: new Date() },
-          { id: 'p2', author: alice, body: 'two', createdAt: new Date() },
+          { id: 'p1', author: alice, body: 'one', createdAt: new Date(), likeCount: 0, likedByMe: false },
+          { id: 'p2', author: alice, body: 'two', createdAt: new Date(), likeCount: 0, likedByMe: false },
         ],
         error: null,
       });
@@ -263,6 +270,123 @@ describe('FeedScreen', () => {
       fireEvent.press(screen.getByTestId('feed-comments-toggle-p2'));
       expect(screen.getByTestId('comments-p1')).toBeOnTheScreen();
       expect(screen.getByTestId('comments-p2')).toBeOnTheScreen();
+    });
+  });
+
+  describe('likes (P4d)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const likeActions = require('../lib/like-actions');
+
+    beforeEach(() => {
+      likeActions.likePost.mockResolvedValue({ error: null });
+      likeActions.unlikePost.mockResolvedValue({ error: null });
+    });
+
+    it("shows a heart toggle on every post + a count when likeCount > 0", async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            id: 'p1',
+            author: alice,
+            body: 'with likes',
+            createdAt: new Date(),
+            likeCount: 3,
+            likedByMe: true,
+          },
+          {
+            id: 'p2',
+            author: alice,
+            body: 'no likes',
+            createdAt: new Date(),
+            likeCount: 0,
+            likedByMe: false,
+          },
+        ],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      expect(screen.getByTestId('feed-like-p1')).toBeOnTheScreen();
+      expect(screen.getByTestId('feed-like-count-p1').props.children).toBe(3);
+      // Count is hidden when likeCount is 0 (keeps the row visually
+      // calm when nobody has liked).
+      expect(screen.queryByTestId('feed-like-count-p2')).toBeNull();
+    });
+
+    it('tap heart (unliked → liked): calls likePost + optimistically bumps the count', async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            id: 'p1',
+            author: alice,
+            body: 'hi',
+            createdAt: new Date(),
+            likeCount: 0,
+            likedByMe: false,
+          },
+        ],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('feed-like-p1'));
+      // Optimistic update fires SYNCHRONOUSLY; the count flips
+      // before the action resolves.
+      expect(screen.getByTestId('feed-like-count-p1').props.children).toBe(1);
+      await waitFor(() =>
+        expect(likeActions.likePost).toHaveBeenCalledWith({ postId: 'p1' }),
+      );
+    });
+
+    it('tap heart (liked → unliked): calls unlikePost + drops the count', async () => {
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            id: 'p1',
+            author: alice,
+            body: 'hi',
+            createdAt: new Date(),
+            likeCount: 2,
+            likedByMe: true,
+          },
+        ],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('feed-like-p1'));
+      // 2 → 1 optimistically.
+      expect(screen.getByTestId('feed-like-count-p1').props.children).toBe(1);
+      await waitFor(() =>
+        expect(likeActions.unlikePost).toHaveBeenCalledWith({ postId: 'p1' }),
+      );
+    });
+
+    it('reverts the optimistic update + toasts when the action fails', async () => {
+      likeActions.likePost.mockResolvedValue({
+        error: "Couldn't like post. Please try again.",
+      });
+      mockedList.mockResolvedValue({
+        data: [
+          {
+            id: 'p1',
+            author: alice,
+            body: 'hi',
+            createdAt: new Date(),
+            likeCount: 0,
+            likedByMe: false,
+          },
+        ],
+        error: null,
+      });
+      render(<FeedScreen />);
+      await flushAsync();
+      fireEvent.press(screen.getByTestId('feed-like-p1'));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/like/i)),
+      );
+      // Count reverts back to 0 → hidden again.
+      expect(screen.queryByTestId('feed-like-count-p1')).toBeNull();
     });
   });
 });

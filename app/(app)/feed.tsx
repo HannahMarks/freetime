@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { PostComments } from '../../components/PostComments';
 import { useAuth } from '../../lib/auth';
+import { likePost, unlikePost } from '../../lib/like-actions';
 import { createPost, deletePost, listFeedPosts } from '../../lib/post-actions';
 import type { PostItem } from '../../lib/post-actions';
 import { toast } from '../../lib/toast';
@@ -96,6 +97,43 @@ export default function FeedScreen() {
       await fetchFeed();
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleToggleLike(post: PostItem) {
+    // Optimistic update: flip the heart + adjust the count
+    // immediately so the tap feels instant. If the action rejects
+    // we revert + toast. Failure mode is rare (network blip while
+    // double-tapping; RLS denial would mean the post wasn't really
+    // visible — also rare).
+    const wasLiked = post.likedByMe;
+    setItems((prev) =>
+      prev.map((p) =>
+        p.id === post.id
+          ? {
+              ...p,
+              likedByMe: !wasLiked,
+              likeCount: p.likeCount + (wasLiked ? -1 : 1),
+            }
+          : p,
+      ),
+    );
+    const { error } = wasLiked
+      ? await unlikePost({ postId: post.id })
+      : await likePost({ postId: post.id });
+    if (error) {
+      toast.error(error);
+      setItems((prev) =>
+        prev.map((p) =>
+          p.id === post.id
+            ? {
+                ...p,
+                likedByMe: wasLiked,
+                likeCount: p.likeCount + (wasLiked ? 1 : -1),
+              }
+            : p,
+        ),
+      );
     }
   }
 
@@ -201,37 +239,74 @@ export default function FeedScreen() {
                 </View>
                 <Text style={styles.postBody}>{post.body}</Text>
 
-                {/* P4c: Comments toggle + inline thread. Tapping
-                    expands / collapses; expanded threads fetch their
-                    own comments via the PostComments sub-component
-                    (each thread owns its own state so the feed
-                    screen doesn't have to maintain per-post maps). */}
-                <Pressable
-                  testID={`feed-comments-toggle-${post.id}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    expandedPosts.has(post.id)
-                      ? 'Hide comments'
-                      : 'Show comments'
-                  }
-                  onPress={() => {
-                    setExpandedPosts((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(post.id)) next.delete(post.id);
-                      else next.add(post.id);
-                      return next;
-                    });
-                  }}
-                  hitSlop={6}
-                  style={({ pressed }) => [
-                    styles.commentsToggle,
-                    pressed && styles.commentsTogglePressed,
-                  ]}
-                >
-                  <Text style={styles.commentsToggleLabel}>
-                    {expandedPosts.has(post.id) ? 'Hide comments' : '💬 Comment'}
-                  </Text>
-                </Pressable>
+                <View style={styles.actionRow}>
+                  {/* P4d: heart toggle. Optimistic-update — the
+                      icon flips instantly + the local count
+                      adjusts; if the server rejects (rare; mostly
+                      a network blip) we revert + toast. */}
+                  <Pressable
+                    testID={`feed-like-${post.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      post.likedByMe ? 'Unlike' : 'Like'
+                    }
+                    onPress={() => handleToggleLike(post)}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.likeButton,
+                      pressed && styles.likeButtonPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.likeIcon,
+                        post.likedByMe && styles.likeIconActive,
+                      ]}
+                    >
+                      {post.likedByMe ? '❤' : '♡'}
+                    </Text>
+                    {post.likeCount > 0 ? (
+                      <Text
+                        testID={`feed-like-count-${post.id}`}
+                        style={styles.likeCount}
+                      >
+                        {post.likeCount}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+
+                  {/* P4c: Comments toggle + inline thread. Tapping
+                      expands / collapses; expanded threads fetch their
+                      own comments via the PostComments sub-component
+                      (each thread owns its own state so the feed
+                      screen doesn't have to maintain per-post maps). */}
+                  <Pressable
+                    testID={`feed-comments-toggle-${post.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      expandedPosts.has(post.id)
+                        ? 'Hide comments'
+                        : 'Show comments'
+                    }
+                    onPress={() => {
+                      setExpandedPosts((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(post.id)) next.delete(post.id);
+                        else next.add(post.id);
+                        return next;
+                      });
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.commentsToggle,
+                      pressed && styles.commentsTogglePressed,
+                    ]}
+                  >
+                    <Text style={styles.commentsToggleLabel}>
+                      {expandedPosts.has(post.id) ? 'Hide comments' : '💬 Comment'}
+                    </Text>
+                  </Pressable>
+                </View>
 
                 {expandedPosts.has(post.id) ? (
                   <PostComments
@@ -325,12 +400,29 @@ const styles = StyleSheet.create({
   postAuthor: { flex: 1, fontSize: 14, fontWeight: '600', color: '#111' },
   postTime: { fontSize: 12, color: '#888' },
   postBody: { fontSize: 14, color: '#222', lineHeight: 20 },
-  // Inline "Comment" / "Hide comments" button. Aligned with the
-  // post body's left edge so the affordance hangs off the bottom
-  // of the row without competing visually with the body itself.
-  commentsToggle: {
-    alignSelf: 'flex-start',
+  // Horizontal row holding the heart toggle + comments toggle —
+  // sits below the post body, before the optional inline thread.
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
     marginTop: 4,
+  },
+  // P4d: heart button. Outline-state heart is gray-ish; the active
+  // (filled) state uses a warm-red so a liked post reads as "you
+  // tapped it" even from across the screen.
+  likeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 2,
+  },
+  likeButtonPressed: { opacity: 0.5 },
+  likeIcon: { fontSize: 16, color: '#888' },
+  likeIconActive: { color: '#e0245e' },
+  likeCount: { fontSize: 12, color: '#555', fontWeight: '500' },
+  // Inline "Comment" / "Hide comments" button.
+  commentsToggle: {
     paddingVertical: 2,
   },
   commentsTogglePressed: { opacity: 0.5 },

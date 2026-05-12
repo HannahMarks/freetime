@@ -12,6 +12,12 @@ export type PostItem = {
   author: FriendProfile;
   body: string;
   createdAt: Date;
+  /** Total like count on this post (P4d). Embedded into the feed
+   * fetch so the heart counter renders without a second query. */
+  likeCount: number;
+  /** Whether the viewing user has liked this post (P4d). Drives
+   * the filled-vs-outline heart on the feed row. */
+  likedByMe: boolean;
 };
 
 type PostRow = {
@@ -20,11 +26,18 @@ type PostRow = {
   body: string;
   created_at: string;
   author: FriendProfile | null;
+  /** Embedded likes from the postgrest join — RLS already filters
+   * to likes on visible posts only, so this is just "likes I'm
+   * allowed to see on this row" (always = all likes for posts I
+   * can see). Each entry has just liker_id since that's all the
+   * feed needs to compute count + likedByMe. */
+  likes: { liker_id: string }[] | null;
 };
 
 const SELECT_CLAUSE =
   'id, author_id, body, created_at, ' +
-  'author:profiles!posts_author_id_fkey(id, display_name, color)';
+  'author:profiles!posts_author_id_fkey(id, display_name, color), ' +
+  'likes(liker_id)';
 
 /** Cap on `listFeedPosts` results — hobby tier, low volume, so a
  * single query is fine for now. Pagination ships when feeds grow
@@ -76,6 +89,15 @@ export async function listFeedPosts(): Promise<{
   data: PostItem[] | null;
   error: string | null;
 }> {
+  // Need the live user id to compute `likedByMe` per row. Same
+  // session round-trip create/delete already make; doesn't add a
+  // meaningful latency cost (the call is cached client-side after
+  // the first auth.getUser).
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const myId = user?.id ?? null;
+
   const result = await supabase
     .from('posts')
     .select(SELECT_CLAUSE)
@@ -89,11 +111,14 @@ export async function listFeedPosts(): Promise<{
   const items: PostItem[] = [];
   for (const row of (result.data ?? []) as unknown as PostRow[]) {
     if (!row.author) continue;
+    const likes = row.likes ?? [];
     items.push({
       id: row.id,
       author: row.author,
       body: row.body,
       createdAt: new Date(row.created_at),
+      likeCount: likes.length,
+      likedByMe: myId !== null && likes.some((l) => l.liker_id === myId),
     });
   }
   return { data: items, error: null };
