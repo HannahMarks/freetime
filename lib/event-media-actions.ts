@@ -178,3 +178,68 @@ export async function uploadEventPhoto(args: {
   }
   return { error: null };
 }
+
+/** How long a signed URL stays valid. 1 hour is generous for a
+ * sheet-open session; the viewer re-signs on next list fetch. */
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+/**
+ * Batch-generate signed URLs for a set of storage paths. Returns a
+ * `Map<path, signedUrl>` so the UI can pair URLs back to its
+ * EventMediaItem list without re-fetching. Paths whose signing fails
+ * are simply absent from the map — the caller decides how to fall
+ * back (likely just skip rendering that thumbnail).
+ *
+ * Bucket is private, so the album viewer can't render Image
+ * components from raw paths. Signed URLs are time-limited and
+ * scope-pinned to a single object, which keeps the bucket access
+ * gate intact while letting the standard <Image> component render
+ * the photo.
+ */
+export async function signEventMediaUrls(args: {
+  paths: string[];
+}): Promise<{ data: Map<string, string> | null; error: string | null }> {
+  const out = new Map<string, string>();
+  if (args.paths.length === 0) return { data: out, error: null };
+
+  const result = await supabase.storage
+    .from(EVENT_MEDIA_BUCKET)
+    .createSignedUrls(args.paths, SIGNED_URL_TTL_SECONDS);
+
+  if (result.error) {
+    return { data: null, error: describeError("Couldn't load the album", result.error) };
+  }
+  for (const row of result.data ?? []) {
+    if (row.error || !row.signedUrl || !row.path) continue;
+    out.set(row.path, row.signedUrl);
+  }
+  return { data: out, error: null };
+}
+
+/**
+ * Delete a media row + its storage object. Used by the album
+ * viewer's trash button. Storage object goes first; if its removal
+ * fails we abort so we don't end up with a missing-bytes row that
+ * the viewer can't render. If the metadata delete fails after a
+ * successful storage remove, the object is already gone — surface
+ * the error so the user can retry the cleanup.
+ *
+ * RLS enforces "uploader or host" on both layers, so this action
+ * doesn't need to check the caller's role itself.
+ */
+export async function deleteEventMedia(args: {
+  id: string;
+  storagePath: string;
+}): Promise<{ error: string | null }> {
+  const remove = await supabase.storage
+    .from(EVENT_MEDIA_BUCKET)
+    .remove([args.storagePath]);
+  if (remove.error) {
+    return { error: describeError("Couldn't delete the photo", remove.error) };
+  }
+  const { error } = await supabase.from('event_media').delete().eq('id', args.id);
+  if (error) {
+    return { error: describeError("Couldn't delete the photo record", error) };
+  }
+  return { error: null };
+}

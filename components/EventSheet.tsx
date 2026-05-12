@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Dimensions,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -41,11 +42,13 @@ import {
 import {
   type EventMediaItem,
   listEventMedia,
+  signEventMediaUrls,
   uploadEventPhoto,
 } from '../lib/event-media-actions';
 import type { RecurrenceFreq, RecurrenceRule } from '../lib/recurrence';
 import { toast } from '../lib/toast';
 import { DatePicker } from './DatePicker';
+import { EventAlbumViewer } from './EventAlbumViewer';
 import { TimePicker } from './TimePicker';
 
 /** YYYY-MM-DD for a local-zone Date — used for the `until` field. */
@@ -203,6 +206,16 @@ export function EventSheet({
   const [albumItems, setAlbumItems] = useState<EventMediaItem[]>([]);
   const [albumLoading, setAlbumLoading] = useState<boolean>(false);
   const [albumUploading, setAlbumUploading] = useState<boolean>(false);
+  // Thumbnail signed URLs — keyed by storage_path so the strip can
+  // render <Image> components from the private bucket. Re-signs on
+  // every refetch since signed URLs have a finite TTL.
+  const [albumThumbUrls, setAlbumThumbUrls] = useState<Map<string, string>>(
+    () => new Map(),
+  );
+  // P2b: the full-screen pager. Open when the user taps a thumbnail;
+  // `viewerIndex` is the position in `albumItems` the viewer opened on.
+  const [viewerOpen, setViewerOpen] = useState<boolean>(false);
+  const [viewerIndex, setViewerIndex] = useState<number>(0);
   // Progress feedback during a multi-photo upload. `[done, total]`
   // with both numbers === total when finished. null when not
   // actively uploading. Drives the button label
@@ -315,7 +328,24 @@ export function EventSheet({
         toast.error(error);
         return;
       }
-      if (data) setAlbumItems(data);
+      if (data) {
+        setAlbumItems(data);
+        // Re-sign URLs for the thumbnail strip. Empty list → reset
+        // to an empty map so a deleted-last-photo case doesn't keep
+        // stale URLs around.
+        if (data.length === 0) {
+          setAlbumThumbUrls(new Map());
+        } else {
+          const { data: urls, error: signError } = await signEventMediaUrls({
+            paths: data.map((m) => m.storagePath),
+          });
+          if (signError) {
+            toast.error(signError);
+          } else if (urls) {
+            setAlbumThumbUrls(urls);
+          }
+        }
+      }
     } finally {
       setAlbumLoading(false);
     }
@@ -721,23 +751,66 @@ export function EventSheet({
                       </Text>
                     </View>
                   ) : null}
-                  {/* Album section (Phase 3 P2a). Visible to event
-                      attendees only — host OR an accepted invitee.
-                      Pending / declined / maybe invitees can't add
-                      photos, matching the storage.objects RLS.
-                      For now we show just the count + an "Add photo"
-                      button; the grid view + full-screen pager
-                      ship in P2b. */}
+                  {/* Album section. Visible to event attendees only
+                      (host OR accepted invitee — same gate as the
+                      event_media INSERT RLS so the affordance can't
+                      appear for a user who'd be denied at the API).
+                      The thumbnail strip lets the user scan + tap to
+                      open the full-screen pager. Empty state falls
+                      back to "No photos yet" copy. */}
                   {editing && (isHost || myRsvp?.status === 'accepted') ? (
                     <View style={styles.viewRow} testID="album-section">
-                      <Text style={styles.viewLabel}>Album</Text>
-                      <Text style={styles.viewValue} testID="album-count">
-                        {albumLoading
-                          ? 'Loading…'
-                          : albumItems.length === 0
-                            ? 'No photos yet'
-                            : `${albumItems.length} ${albumItems.length === 1 ? 'photo' : 'photos'}`}
+                      <Text style={styles.viewLabel}>
+                        Album {albumItems.length > 0
+                          ? `(${albumItems.length})`
+                          : ''}
                       </Text>
+                      {albumLoading ? (
+                        <Text style={styles.viewValue} testID="album-count">
+                          Loading…
+                        </Text>
+                      ) : albumItems.length === 0 ? (
+                        <Text style={styles.viewValue} testID="album-count">
+                          No photos yet
+                        </Text>
+                      ) : (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          testID="album-thumbs"
+                          contentContainerStyle={styles.thumbRow}
+                        >
+                          {albumItems.map((m, i) => {
+                            const url = albumThumbUrls.get(m.storagePath);
+                            return (
+                              <Pressable
+                                key={m.id}
+                                testID={`album-thumb-${m.id}`}
+                                onPress={() => {
+                                  setViewerIndex(i);
+                                  setViewerOpen(true);
+                                }}
+                                style={({ pressed }) => [
+                                  styles.thumbWrap,
+                                  pressed && styles.thumbWrapPressed,
+                                ]}
+                              >
+                                {url ? (
+                                  <Image
+                                    source={{ uri: url }}
+                                    style={styles.thumb}
+                                    resizeMode="cover"
+                                  />
+                                ) : (
+                                  <View
+                                    style={[styles.thumb, styles.thumbPlaceholder]}
+                                  />
+                                )}
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      )}
                       <Pressable
                         onPress={handleAddPhoto}
                         accessibilityRole="button"
@@ -1106,6 +1179,32 @@ export function EventSheet({
           </SafeAreaView>
         </Animated.View>
       </GestureDetector>
+
+      {/* Full-screen photo viewer. Rendered alongside the sheet so
+          the user stays "inside" the event when paging through its
+          album. onDeleted strips the row from albumItems + the
+          signed-URL map without a full refetch (RLS already gated
+          the delete; we know the row is gone). */}
+      {editing ? (
+        <EventAlbumViewer
+          visible={viewerOpen}
+          items={albumItems}
+          initialIndex={viewerIndex}
+          currentUserId={currentUserId}
+          isHost={isHost}
+          onClose={() => setViewerOpen(false)}
+          onDeleted={(id) => {
+            setAlbumItems((prev) => prev.filter((m) => m.id !== id));
+            setAlbumThumbUrls((prev) => {
+              const removed = albumItems.find((m) => m.id === id);
+              if (!removed) return prev;
+              const next = new Map(prev);
+              next.delete(removed.storagePath);
+              return next;
+            });
+          }}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -1306,6 +1405,21 @@ const styles = StyleSheet.create({
   albumAddButtonPressed: { opacity: 0.6 },
   albumAddButtonDisabled: { opacity: 0.45 },
   albumAddLabel: { fontSize: 13, color: '#111', fontWeight: '600' },
+  // Horizontal thumbnail strip — newest-first per the list order
+  // listEventMedia returns. ScrollView (not FlatList) since N is
+  // small for a typical event album; FlatList's virtualisation
+  // adds complexity without benefit here.
+  thumbRow: { flexDirection: 'row', gap: 8, paddingVertical: 4 },
+  thumbWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#eee',
+  },
+  thumbWrapPressed: { opacity: 0.7 },
+  thumb: { width: '100%', height: '100%' },
+  thumbPlaceholder: { backgroundColor: '#e8e8e8' },
   // Invitee RSVP pills. Three side-by-side rounded buttons; the
   // currently-selected one fills (dark bg + white text) for an
   // unambiguous "this is my RSVP" affordance.
