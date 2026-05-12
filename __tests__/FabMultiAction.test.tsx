@@ -117,6 +117,32 @@ describe('FabMultiAction', () => {
     expect(style.borderColor.toLowerCase()).toBe('#9c27b0');
   });
 
+  it('renders the busy + event sub-FABs at the same diameter as the primary (consistent stack)', () => {
+    render(
+      <FabMultiAction
+        color="#9C27B0"
+        onPressBusy={jest.fn()}
+        onPressEvent={jest.fn()}
+      />,
+    );
+    const primary = screen.getByTestId('fab-primary');
+    const primaryStyle = Array.isArray(primary.props.style)
+      ? Object.assign({}, ...primary.props.style.filter(Boolean))
+      : primary.props.style;
+    fireEvent.press(primary);
+    for (const tid of ['fab-action-busy', 'fab-action-event']) {
+      const sub = screen.getByTestId(tid);
+      const subStyle = Array.isArray(sub.props.style)
+        ? Object.assign({}, ...sub.props.style.filter(Boolean))
+        : sub.props.style;
+      // Each sub-FAB has the same width / height as the primary —
+      // user feedback was that the previous smaller sub-FABs read as
+      // "secondary helpers" rather than peer actions.
+      expect(subStyle.width).toBe(primaryStyle.width);
+      expect(subStyle.height).toBe(primaryStyle.height);
+    }
+  });
+
   it('falls back to a sensible default color when no color is provided', () => {
     // Should NOT crash if profile.color hasn't loaded yet (auth in
     // flight). The component just paints with the fallback.
