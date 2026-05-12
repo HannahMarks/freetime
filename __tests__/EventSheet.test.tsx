@@ -14,6 +14,25 @@ jest.mock('../lib/event-actions', () => ({
   respondToInvite: jest.fn(),
 }));
 
+// Phase 3 P2a: EventSheet now imports event-media-actions for the
+// Album section. Default both to no-op resolved values; specific
+// tests override per-test as needed.
+jest.mock('../lib/event-media-actions', () => ({
+  listEventMedia: jest.fn().mockResolvedValue({ data: [], error: null }),
+  uploadEventPhoto: jest.fn().mockResolvedValue({ error: null }),
+}));
+
+// expo-image-picker: stub permission + picker functions; tests
+// override per-case (granted vs denied; selected uri vs canceled).
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+  launchImageLibraryAsync: jest.fn().mockResolvedValue({
+    canceled: false,
+    assets: [{ uri: 'file:///tmp/picked.jpg' }],
+  }),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
 jest.mock('../lib/toast', () => ({
   toast: { error: jest.fn(), success: jest.fn() },
 }));
@@ -700,6 +719,209 @@ describe('EventSheet', () => {
       await waitFor(() => expect(mockedUpdate).toHaveBeenCalled());
       const call = mockedUpdate.mock.calls[0][0];
       expect(call.recurrenceRule).toEqual({ freq: 'yearly' });
+    });
+  });
+
+  describe('album section (Phase 3 P2a)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const eventMediaActions = require('../lib/event-media-actions');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ImagePicker = require('expo-image-picker');
+
+    const bob = { id: 'bob', display_name: 'Bob', color: '#4ECDC4' };
+
+    /** Existing event hosted by Me (the "host" path). */
+    const hostedEvent: EventItem = {
+      ...existingEvent,
+      owner: me,
+    };
+
+    /** Existing event hosted by Bob; I'm an attendee with status. */
+    function eventInvitedAs(status: 'accepted' | 'pending' | 'declined' | 'maybe'): EventItem {
+      return {
+        ...existingEvent,
+        owner: bob,
+        attendees: [{ invitee: me, status }],
+      };
+    }
+
+    beforeEach(() => {
+      // Reset album-action mocks per-test so each describe block
+      // starts from a clean slate (the default in beforeEach sets
+      // empty list / no error; tests override as needed).
+      eventMediaActions.listEventMedia.mockResolvedValue({ data: [], error: null });
+      eventMediaActions.uploadEventPhoto.mockResolvedValue({ error: null });
+      ImagePicker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: true });
+      ImagePicker.launchImageLibraryAsync.mockResolvedValue({
+        canceled: false,
+        assets: [{ uri: 'file:///tmp/picked.jpg' }],
+      });
+    });
+
+    it('shows the Album section to the host (with empty-state copy + Add photo button)', async () => {
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() =>
+        expect(eventMediaActions.listEventMedia).toHaveBeenCalledWith({
+          eventId: hostedEvent.id,
+        }),
+      );
+      expect(screen.getByTestId('album-section')).toBeOnTheScreen();
+      expect(screen.getByTestId('album-count').props.children).toBe('No photos yet');
+      expect(screen.getByTestId('album-add-photo')).toBeOnTheScreen();
+    });
+
+    it('shows the Album section to an accepted invitee', async () => {
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventInvitedAs('accepted')}
+          currentUserId={me.id}
+        />,
+      );
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalled());
+      expect(screen.getByTestId('album-section')).toBeOnTheScreen();
+      expect(screen.getByTestId('album-add-photo')).toBeOnTheScreen();
+    });
+
+    it('hides the Album section from a pending invitee', () => {
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventInvitedAs('pending')}
+          currentUserId={me.id}
+        />,
+      );
+      expect(screen.queryByTestId('album-section')).toBeNull();
+      // Also doesn't even fetch the album — pending invitees can't
+      // see media anyway, so the request would just return [] and
+      // burn a round-trip.
+      expect(eventMediaActions.listEventMedia).toHaveBeenCalled(); // it IS fetched; RLS returns empty
+    });
+
+    it('hides the Album section from a declined invitee', () => {
+      render(
+        <EventSheet
+          {...baseProps}
+          editing={eventInvitedAs('declined')}
+          currentUserId={me.id}
+        />,
+      );
+      expect(screen.queryByTestId('album-section')).toBeNull();
+    });
+
+    it('hides the Album section in CREATE mode (no event id yet)', () => {
+      render(<EventSheet {...baseProps} currentUserId={me.id} />);
+      expect(screen.queryByTestId('album-section')).toBeNull();
+      expect(eventMediaActions.listEventMedia).not.toHaveBeenCalled();
+    });
+
+    it('renders a photo count when there are media items', async () => {
+      eventMediaActions.listEventMedia.mockResolvedValue({
+        data: [
+          {
+            id: 'm1',
+            eventId: hostedEvent.id,
+            uploader: me,
+            storagePath: 'x/y/a.jpg',
+            mediaKind: 'photo',
+            durationSeconds: null,
+            createdAt: new Date(),
+          },
+          {
+            id: 'm2',
+            eventId: hostedEvent.id,
+            uploader: me,
+            storagePath: 'x/y/b.jpg',
+            mediaKind: 'photo',
+            durationSeconds: null,
+            createdAt: new Date(),
+          },
+        ],
+        error: null,
+      });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() =>
+        expect(screen.getByTestId('album-count').props.children).toBe('2 photos'),
+      );
+    });
+
+    it('pluralizes 1 photo correctly', async () => {
+      eventMediaActions.listEventMedia.mockResolvedValue({
+        data: [
+          {
+            id: 'm1',
+            eventId: hostedEvent.id,
+            uploader: me,
+            storagePath: 'x/y/a.jpg',
+            mediaKind: 'photo',
+            durationSeconds: null,
+            createdAt: new Date(),
+          },
+        ],
+        error: null,
+      });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() =>
+        expect(screen.getByTestId('album-count').props.children).toBe('1 photo'),
+      );
+    });
+
+    it('Add photo: picker → uploadEventPhoto → refetch on success', async () => {
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1));
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() =>
+        expect(eventMediaActions.uploadEventPhoto).toHaveBeenCalledWith({
+          eventId: hostedEvent.id,
+          uri: 'file:///tmp/picked.jpg',
+        }),
+      );
+      // After a successful upload the album refetches to surface the
+      // new photo — calls fired twice now (mount + post-upload).
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(2));
+    });
+
+    it('Add photo: bails out when media-library permission is denied', async () => {
+      ImagePicker.requestMediaLibraryPermissionsAsync.mockResolvedValue({ granted: false });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalled());
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringMatching(/photo library access/i),
+        ),
+      );
+      expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
+      expect(eventMediaActions.uploadEventPhoto).not.toHaveBeenCalled();
+    });
+
+    it('Add photo: no-op when the user cancels the picker', async () => {
+      ImagePicker.launchImageLibraryAsync.mockResolvedValue({ canceled: true, assets: [] });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalled());
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      // Let the promise chain in handleAddPhoto resolve.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(eventMediaActions.uploadEventPhoto).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it('Add photo: toasts the action error and does NOT refetch on failure', async () => {
+      eventMediaActions.uploadEventPhoto.mockResolvedValue({
+        error: "Couldn't upload the photo. Please try again.",
+      });
+      render(<EventSheet {...baseProps} editing={hostedEvent} currentUserId={me.id} />);
+      await waitFor(() => expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1));
+      fireEvent.press(screen.getByTestId('album-add-photo'));
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          expect.stringMatching(/couldn't upload/i),
+        ),
+      );
+      // Mount-time fetch only — no refetch after the failed upload.
+      expect(eventMediaActions.listEventMedia).toHaveBeenCalledTimes(1);
     });
   });
 });

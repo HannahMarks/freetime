@@ -28,6 +28,21 @@ jest.mock('../lib/event-actions', () => ({
   respondToInvite: jest.fn().mockResolvedValue({ error: null }),
 }));
 
+// Phase 3 P2a: EventSheet imports event-media-actions for the Album
+// section. Mock here so this test (which renders the calendar tab
+// → EventSheet) doesn't pull in the real Supabase + expo-image-picker
+// modules.
+jest.mock('../lib/event-media-actions', () => ({
+  listEventMedia: jest.fn().mockResolvedValue({ data: [], error: null }),
+  uploadEventPhoto: jest.fn().mockResolvedValue({ error: null }),
+}));
+
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+  launchImageLibraryAsync: jest.fn().mockResolvedValue({ canceled: true, assets: [] }),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
 jest.mock('../lib/friend-actions', () => ({
   listFriendships: jest.fn(),
 }));

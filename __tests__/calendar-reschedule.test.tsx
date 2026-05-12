@@ -33,6 +33,18 @@ jest.mock('../lib/event-actions', () => ({
   respondToInvite: jest.fn().mockResolvedValue({ error: null }),
 }));
 
+// Phase 3 P2a: EventSheet imports event-media-actions for the Album.
+jest.mock('../lib/event-media-actions', () => ({
+  listEventMedia: jest.fn().mockResolvedValue({ data: [], error: null }),
+  uploadEventPhoto: jest.fn().mockResolvedValue({ error: null }),
+}));
+
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+  launchImageLibraryAsync: jest.fn().mockResolvedValue({ canceled: true, assets: [] }),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
 jest.mock('../lib/friend-actions', () => ({
   listFriendships: jest.fn().mockResolvedValue({
     data: { incoming: [], outgoing: [], friends: [] },
