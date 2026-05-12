@@ -148,8 +148,8 @@ Status: ✅ shipped · 🚧 in progress · ⏳ planned
 
 ### Phase 3 — per-event photo albums
 
-- 🚧 `event_media` schema (P1a) — table with `(event_id, uploader_id, storage_path, media_kind in {'photo','video'}, duration_seconds, created_at)`. RLS gates SELECT + INSERT to **attendees** (host or accepted invitees) via a new `is_attendee_of_event` SECURITY DEFINER helper (parallel to `is_friend_of`); DELETE allowed for uploader OR host (moderation). No UPDATE policy — media rows are write-once. pgTAP covers schema + helper semantics + INSERT/SELECT gates for accepted vs pending invitees.
-- ⏳ Supabase Storage bucket policies (P1b) — `event-media` bucket; same attendees-only gate on `storage.objects` so the actual bytes are protected, not just the metadata
+- ✅ `event_media` schema (P1a) — table with `(event_id, uploader_id, storage_path, media_kind in {'photo','video'}, duration_seconds, created_at)`. RLS gates SELECT + INSERT to **attendees** (host or accepted invitees) via a new `is_attendee_of_event` SECURITY DEFINER helper (parallel to `is_friend_of`); DELETE allowed for uploader OR host (moderation). No UPDATE policy — media rows are write-once. pgTAP covers schema + helper semantics + INSERT/SELECT gates for accepted vs pending invitees ([#69](https://github.com/HannahMarks/freetime/pull/69))
+- 🚧 Supabase Storage bucket (P1b) — private `event-media` bucket + `storage.objects` RLS so the actual bytes share the attendees-only gate. Path scheme `<event_id>/<uploader_id>/<filename>`; policies parse the first two path segments to gate SELECT (any attendee), INSERT (attendee + folder = own auth.uid()), and DELETE (uploader or host). No `storage.objects` UPDATE policy — Supabase Storage updates rename objects; new uploads get a new path
 - ⏳ Upload UI (P2a) — capture / pick a photo or short video from the EventSheet, compress aggressively (hobby-tier storage), insert the `event_media` row + upload to the bucket
 - ⏳ Album viewer (P2b) — grid view scoped to one event; tap → full-screen pager with the standard 3-photo prev/curr/next pattern
 
